@@ -1,0 +1,13 @@
+[package]
+name = "rblitz"
+version = "0.1.0"
+authors = ["Lukas Wirth <lukastw97@gmail.com>"]
+edition = "2018"
+description = "legoland private server"
+publish = false
+
+[dependencies]
+fern = { version = "0.5", features = ["colored"] }
+log = "0.4.6"
+enet = { git = "https://github.com/Veykril/enet-rs", rev = "6c85e23" }
+specs = "0.14.3"
