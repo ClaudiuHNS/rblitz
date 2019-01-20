@@ -1,7 +1,4 @@
-#![deny(bare_trait_objects)]
-
-mod config;
-mod lenet_server;
+use rblitz::{config, game_server};
 
 fn main() {
     setup_logger().unwrap();
@@ -13,24 +10,14 @@ fn main() {
         *keyidx = idx as u32 + 1;
         key.copy_from_slice(&serverc.keys[idx].as_bytes()[..16]);
     }
-    let mut server = lenet_server::LENetServer::new(0, 5119, keyarr);
-    loop {
-        match server.service(0) {
-            Ok(event) => match event {
-                lenet_server::Event::Connected(cid) => log::info!("Connected: {}", cid),
-                lenet_server::Event::Disconnected(cid) => log::info!("Disconnected: {}", cid),
-                lenet_server::Event::Packet(cid, channel, packet) => log::trace!(
-                    "Received from {} on ch: {} id: {:?}",
-                    cid,
-                    channel,
-                    &*packet
-                ),
-                lenet_server::Event::NoEvent => {}
-            },
-            Err(e) => log::error!("{:?}", e),
-        }
-    }
-    //unsafe { enet_sys::enet_initialize() };
+    let mut server = game_server::GameServer::new(
+        serverc.address.parse().expect("invalid server ip address"),
+        serverc.port,
+        keyarr,
+    )
+    .unwrap();
+    server.run();
+    //unsafe { enet_sys::enet_deinitialize() };
 }
 
 fn setup_logger() -> Result<(), fern::InitError> {
