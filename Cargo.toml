@@ -8,11 +8,14 @@ description = "legoland private server"
 publish = false
 
 [dependencies]
-rblitz_packets = { git = "https://github.com/Veykril/rblitz_packets", rev = "d19a505" }
+rblitz_packets = { git = "https://github.com/Veykril/rblitz_packets", rev = "21beadf" }
 fern = { version = "0.5", features = ["colored"] }
 log = "0.4.6"
 enet-sys = { path = "./enet-sys" }
 specs = "0.14.3"
+shrev = "1.0.1"
+shred = "0.7.1"
+shred-derive = "0.5.1"
 block-cipher-trait = "0.6.2"
 block-modes = "0.2.0"
 blowfish = "0.4.0"
