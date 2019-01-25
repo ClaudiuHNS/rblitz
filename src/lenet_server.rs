@@ -116,3 +116,7 @@ fn peer_data<'a, T>(peer: *mut enet::ENetPeer) -> Option<&'a T> {
         }
     }
 }
+
+// no problem here since service(the only method) takes &mut self
+unsafe impl core::marker::Send for LENetServer {}
+unsafe impl core::marker::Sync for LENetServer {}

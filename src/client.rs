@@ -52,7 +52,7 @@ impl Client {
             .unwrap();
     }
 
-    fn send_data(&self, channel: Channel, data: &mut [u8]) {
+    fn send_data(&mut self, channel: Channel, data: &mut [u8]) {
         let nopadlen = data.len() - (data.len() % 8);
         let _ = self.blowfish().encrypt_nopad(&mut data[..nopadlen]);
         unsafe {
@@ -68,7 +68,12 @@ impl Client {
         }
     }
 
-    pub fn send_game_packet<P: GamePacket>(&self, channel: Channel, sender_net_id: u32, packet: P) {
+    pub fn send_game_packet<P: GamePacket>(
+        &mut self,
+        channel: Channel,
+        sender_net_id: u32,
+        packet: P,
+    ) {
         if self.peer.is_some() {
             let mut data = Vec::with_capacity(mem::size_of::<P>() + 1 + 4);
             data.push(P::ID);
@@ -78,7 +83,7 @@ impl Client {
         }
     }
 
-    pub fn send_loading_screen_packet<P: LoadingScreenPacket>(&self, packet: P) {
+    pub fn send_loading_screen_packet<P: LoadingScreenPacket>(&mut self, packet: P) {
         if self.peer.is_some() {
             let mut data = Vec::with_capacity(mem::size_of::<P>() + 1);
             data.push(P::ID);
@@ -87,7 +92,7 @@ impl Client {
         }
     }
 
-    pub fn send_key_check(&self, mut keycheck: KeyCheck) {
+    pub fn send_key_check(&mut self, mut keycheck: KeyCheck) {
         unsafe {
             if self.peer.is_some() {
                 let data = slice::from_raw_parts_mut(

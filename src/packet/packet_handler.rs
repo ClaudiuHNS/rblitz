@@ -1,7 +1,9 @@
 use indexmap::IndexMap;
-use specs::World;
+use shred_derive::SystemData;
+use specs::{Read, Resources, System, WriteExpect};
 
 use crate::client::{ClientId, ClientMap};
+use crate::lenet_server::{Event, LENetServer};
 use crate::packet::{
     game::{GameHandler, GamePacketHandler, RawGamePacket},
     loading_screen::{LoadingScreenHandler, LoadingScreenPacket, RawLoadingScreenPacket},
@@ -10,26 +12,26 @@ use crate::packet::{
 
 pub struct PacketHandler {
     loading_screen_handlers: IndexMap<u8, LoadingScreenHandler>,
-    game_handlers: [Option<GameHandler>; 255],
+    game_handlers: IndexMap<u8, GameHandler>,
 }
 
 impl PacketHandler {
     pub fn new() -> Self {
-        let mut this = PacketHandler {
+        PacketHandler {
             loading_screen_handlers: IndexMap::with_capacity(4),
-            game_handlers: [None; 255],
-        };
-        this.register_all();
-        this
+            game_handlers: IndexMap::with_capacity(32),
+        }
     }
 
-    pub fn handle_packet(&self, world: &mut World, channel: u8, cid: ClientId, data: &mut [u8]) {
+    pub fn handle_packet(
+        &self,
+        world: &mut WorldData,
+        channel: u8,
+        cid: ClientId,
+        data: &mut [u8],
+    ) {
         let channel = Channel::try_from(channel).expect("unknown channel received");
-        world
-            .read_resource::<ClientMap>()
-            .get(&cid)
-            .unwrap()
-            .decrypt(data);
+        world.clients.get(&cid).unwrap().decrypt(data);
         match channel {
             //handled outside of this
             Channel::Handshake => (),
@@ -38,8 +40,7 @@ impl PacketHandler {
             | Channel::Broadcast
             | Channel::BroadcastUnreliable => {
                 let packet = RawGamePacket::from_slice(data).unwrap();
-                log::trace!("Handling 0x{:X} on channel {:?}", packet.id, channel,);
-                if let Some(handler) = &self.game_handlers[packet.id as usize] {
+                if let Some(handler) = self.game_handlers.get(&packet.id) {
                     handler(world, cid, packet.sender_net_id, packet.data).unwrap();
                 } else {
                     log::debug!(
@@ -83,22 +84,15 @@ impl PacketHandler {
         P: GamePacketHandler,
     {
         assert!(
-            self.game_handlers[P::ID as usize]
-                .replace(P::handle)
-                .is_none(),
+            self.game_handlers.insert(P::ID, P::handle).is_none(),
             "Game handler replaced for 0x{id:X}, check that it isn't being registered twice and\
              that the ID(0x{id:X}) is correct",
             id = P::ID
         );
     }
 
-    fn register_all(&mut self) {
-        self.register_loading_screen_packets();
-        self.register_game_packets();
-    }
-
     fn register_game_packets(&mut self) {
-        use rblitz_packets::packets::game::*;
+        use rblitz_packets::packets::game::{request::*, *};
         self.register_game_handler::<CQueryStatusReq>();
         self.register_game_handler::<CSyncVersion>();
         self.register_game_handler::<CCharSelected>();
@@ -112,5 +106,41 @@ impl PacketHandler {
         self.register_loading_screen_handler::<RequestRename>();
         self.register_loading_screen_handler::<RequestReskin>();
         self.register_loading_screen_handler::<TeamRosterUpdate>();
+    }
+}
+
+#[derive(SystemData)]
+pub struct WorldData<'a> {
+    pub time: Read<'a, crate::game_server::GameTime>,
+    pub clients: WriteExpect<'a, ClientMap>,
+    pub server: WriteExpect<'a, LENetServer>,
+}
+
+impl<'a> System<'a> for PacketHandler {
+    type SystemData = WorldData<'a>;
+
+    fn run(&mut self, mut data: Self::SystemData) {
+        match data.server.service(1) {
+            Ok(event) => match event {
+                Event::Connected(keycheck, peer) => {
+                    let cid = ClientId(keycheck.player_id as u32);
+                    if let Some(client) = data.clients.get_mut(&cid) {
+                        client.auth(cid, keycheck, peer);
+                    }
+                }
+                Event::Disconnected(cid) => log::info!("Disconnected: {:?}", cid),
+                Event::Packet(cid, channel, mut packet) => {
+                    self.handle_packet(&mut data, channel, cid, &mut *packet)
+                }
+                Event::NoEvent => (),
+            },
+            Err(e) => log::error!("{:?}", e),
+        }
+    }
+
+    fn setup(&mut self, _res: &mut Resources) {
+        //Self::SystemData::setup(res);
+        self.register_loading_screen_packets();
+        self.register_game_packets();
     }
 }
