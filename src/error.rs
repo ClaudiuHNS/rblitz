@@ -7,6 +7,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     Io(io::Error),
     SerializationError(rblitz_packets::Error),
+    AuthError,
 }
 
 impl error::Error for Error {}

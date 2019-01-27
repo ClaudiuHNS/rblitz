@@ -1,0 +1,14 @@
+[
+    (
+        name: "Test",
+        key: "GLzvuWtyCfHyGhF2",
+        player_id: 12,
+        team: Order,
+        champion: "Blitzcrank",
+        skin_id: 1,
+        summoner_level: 30,
+        summoner_spell0: 97039269,
+        summoner_spell1: 97039269,
+        profile_icon: 0
+    ),
+]

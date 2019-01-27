@@ -23,42 +23,23 @@ impl<'a> RawLoadingScreenPacket<'a> {
 
 pub type LoadingScreenHandler = fn(&mut WorldData, ClientId, &[u8]) -> Result<()>;
 
-pub trait LoadingScreenPacket: PacketId + Serialize
+pub trait LoadingScreenPacket: PacketId + Serialize + std::fmt::Debug
 where
     Self: for<'de> Deserialize<'de>,
 {
     fn handle(world: &mut WorldData, cid: ClientId, data: &[u8]) -> Result<()> {
-        rblitz_packets::from_bytes::<Self>(data)?.handle_self(world, cid)
+        let this = rblitz_packets::from_bytes::<Self>(data)?;
+        log::trace!("[RECEIVED] {:?}", this);
+        this.handle_self(world, cid)
     }
     fn handle_self(self, _world: &mut WorldData, _cid: ClientId) -> Result<()> {
-        log::trace!("Unhandled Loading Screen Packet 0x{:X}", Self::ID);
         Ok(())
     }
 }
 
 impl LoadingScreenPacket for RequestJoinTeam {
     fn handle_self(self, world: &mut WorldData, cid: ClientId) -> Result<()> {
-        let mut roster_update = TeamRosterUpdate::default();
-        roster_update.current_team_size_order = 1;
-        roster_update.current_team_size_chaos = 0;
-        roster_update.team_size_order = 1;
-        roster_update.team_size_chaos = 0;
-        roster_update.order_player_ids[0] = u64::from(cid.0);
-
-        let mut reskin = RequestReskin::default();
-        reskin.player_id = u64::from(cid.0);
-        reskin.skin_id = 0;
-        reskin.name = "Nasus".to_owned();
-
-        let mut rename = RequestRename::default();
-        rename.player_id = u64::from(cid.0);
-        rename.skin_id = 0;
-        rename.name = "RBlitzTest".to_owned();
-
-        let client = world.clients.get_mut(&cid).unwrap();
-        client.send_loading_screen_packet(roster_update);
-        client.send_loading_screen_packet(reskin);
-        client.send_loading_screen_packet(rename);
+        world.clients.send_roster_update(cid);
         Ok(())
     }
 }

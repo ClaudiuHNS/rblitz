@@ -98,14 +98,14 @@ impl PacketHandler {
         self.register_game_handler::<CCharSelected>();
         self.register_game_handler::<CPingLoadInfo>();
         self.register_game_handler::<CClientReady>();
+        self.register_game_handler::<CWorldSendCameraServer>();
+        self.register_game_handler::<SSendSelectedObjID>();
     }
 
     fn register_loading_screen_packets(&mut self) {
         use rblitz_packets::packets::loading_screen::*;
+        // turns out we only receive one packet on this channel?
         self.register_loading_screen_handler::<RequestJoinTeam>();
-        self.register_loading_screen_handler::<RequestRename>();
-        self.register_loading_screen_handler::<RequestReskin>();
-        self.register_loading_screen_handler::<TeamRosterUpdate>();
     }
 }
 
@@ -120,13 +120,20 @@ impl<'a> System<'a> for PacketHandler {
     type SystemData = WorldData<'a>;
 
     fn run(&mut self, mut data: Self::SystemData) {
+        // FIXME loop without timeout until no event happens
         match data.server.service(1) {
             Ok(event) => match event {
                 Event::Connected(keycheck, peer) => {
-                    let cid = ClientId(keycheck.player_id as u32);
-                    if let Some(client) = data.clients.get_mut(&cid) {
-                        client.auth(cid, keycheck, peer);
+                    if let Some((cid, client)) = data
+                        .clients
+                        .iter_mut()
+                        .find(|(_, c)| c.player_id == keycheck.player_id)
+                    {
+                        if client.auth(*cid, keycheck, peer).is_ok() {
+                            return;
+                        }
                     }
+                    unsafe { enet_sys::enet_peer_disconnect_now(peer, 0) };
                 }
                 Event::Disconnected(cid) => log::info!("Disconnected: {:?}", cid),
                 Event::Packet(cid, channel, mut packet) => {

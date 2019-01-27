@@ -4,6 +4,7 @@ use std::net::Ipv4Addr;
 use std::time::Instant;
 
 use crate::client::{Client, ClientId, ClientMap};
+use crate::config::PlayerConfig;
 use crate::lenet_server::LENetServer;
 use crate::packet::packet_handler::PacketHandler;
 
@@ -30,16 +31,18 @@ fn to_enet_address(address: Ipv4Addr, port: u16) -> enet_sys::ENetAddress {
 }
 
 impl GameServer<'_, '_> {
-    pub fn new(address: Ipv4Addr, port: u16, keys: [(u32, [u8; 16]); 12]) -> Result<Self, ()> {
+    pub fn new(address: Ipv4Addr, port: u16, players: Vec<PlayerConfig>) -> Result<Self, ()> {
         let server = LENetServer::new(to_enet_address(address, port));
         let mut world = World::new();
         world.add_resource(GameTime(0.0));
         world.add_resource(server);
-        world.add_resource(
-            keys.iter()
-                .map(|(cid, key)| (ClientId(*cid), Client::new(&key[..])))
-                .collect::<ClientMap>(),
-        );
+        world.add_resource(ClientMap::from(
+            players
+                .into_iter()
+                .enumerate()
+                .map(|(cid, p)| (ClientId(cid as u32), Client::new(p)))
+                .collect::<indexmap::IndexMap<_, _>>(),
+        ));
         let mut dispatcher = DispatcherBuilder::new()
             .with(PacketHandler::new(), "packet_handler", &[])
             .build();
