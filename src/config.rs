@@ -33,7 +33,7 @@ pub struct PlayerConfig {
     pub player_id: u64,
     pub team: Team,
     pub champion: String,
-    pub skin_id: u8,
+    pub skin_id: u32,
     pub summoner_level: u16,
     pub summoner_spell0: u32,
     pub summoner_spell1: u32,

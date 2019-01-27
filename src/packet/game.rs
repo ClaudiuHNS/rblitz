@@ -6,6 +6,7 @@ use rblitz_packets::{
     PacketId,
 };
 
+use crate::client::ClientStatus;
 use crate::client::Team;
 use crate::packet::packet_handler::WorldData;
 use crate::{client::ClientId, error::Result, packet::Channel};
@@ -48,40 +49,35 @@ impl<'a> RawGamePacket<'a> {
 impl<T> GamePacket for T where T: PacketId + Serialize + std::fmt::Debug + for<'de> Deserialize<'de> {}
 
 impl GamePacketHandler for CQueryStatusReq {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
-        world.clients.get_mut(&cid).unwrap().send_game_packet(
-            Channel::Broadcast,
-            0,
-            &SQueryStatusAns { is_ok: true },
-        );
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        world
+            .clients
+            .get_mut(&cid)
+            .unwrap()
+            .send_game_packet(Channel::Broadcast, &SQueryStatusAns { is_ok: true });
         Ok(())
     }
 }
 
 impl GamePacketHandler for CReconnect {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
-        world.clients.get_mut(&cid).unwrap().send_game_packet(
-            Channel::ClientToServer,
-            cid.0,
-            &SReconnect { client_id: cid.0 },
-        );
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        world
+            .clients
+            .get_mut(&cid)
+            .unwrap()
+            .send_game_packet(Channel::ClientToServer, &SReconnect { client_id: cid.0 });
         Ok(())
     }
 }
 
-impl GamePacketHandler for SSendSelectedObjID {
-    fn handle_self(
-        self,
-        _world: &mut WorldData,
-        _cid: ClientId,
-        _sender_net_id: u32,
-    ) -> Result<()> {
+impl GamePacketHandler for CSendSelectedObjID {
+    fn handle_self(self, _world: &mut WorldData, _cid: ClientId, _: u32) -> Result<()> {
         Ok(())
     }
 }
 
 impl GamePacketHandler for CSyncVersion {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
         let mut player_info: [PlayerLoadInfo; 12] = Default::default();
         for (load_info, client) in player_info.iter_mut().zip(world.clients.values()) {
             *load_info = client.player_load_info();
@@ -89,7 +85,6 @@ impl GamePacketHandler for CSyncVersion {
 
         world.clients.get_mut(&cid).unwrap().send_game_packet(
             Channel::Broadcast,
-            0,
             &SSyncVersion {
                 is_version_ok: true,
                 map: 8, //todo replace with world.read_resource::<Map>().id
@@ -103,20 +98,27 @@ impl GamePacketHandler for CSyncVersion {
 }
 
 impl GamePacketHandler for CClientReady {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
-        world.clients.get_mut(&cid).unwrap().send_game_packet(
-            Channel::Broadcast,
-            0,
-            &SStartGame {
-                tournament_pause_enabled: false,
-            },
-        );
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        let clients = &mut world.clients;
+        clients.get_mut(&cid).unwrap().status = ClientStatus::Ready;
+        if clients.values().all(|c| c.status == ClientStatus::Ready) {
+            log::info!("All clients ready, starting game");
+            clients.broadcast(
+                Channel::Broadcast,
+                &SStartGame {
+                    tournament_pause_enabled: false,
+                },
+            );
+            clients
+                .values_mut()
+                .for_each(|c| c.status = ClientStatus::Connected);
+        }
         Ok(())
     }
 }
 
 impl GamePacketHandler for CCharSelected {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
         let client = world.clients.get_mut(&cid).unwrap();
         let create_hero = SCreateHero {
             unit_net_id: 0x40000001,
@@ -134,29 +136,24 @@ impl GamePacketHandler for CCharSelected {
 
         client.send_game_packet(
             Channel::Broadcast,
-            cid.0,
             &SStartSpawn {
                 bot_count_order: 0,
                 bot_count_chaos: 0,
             },
         );
-        client.send_game_packet(Channel::Broadcast, 0, &create_hero);
-        client.send_game_packet(Channel::Broadcast, 0, &SEndSpawn);
+        client.send_game_packet(Channel::Broadcast, &create_hero);
+        client.send_game_packet(Channel::Broadcast, &SEndSpawn);
         Ok(())
     }
 }
 
 impl GamePacketHandler for CPingLoadInfo {
-    fn handle_self(
-        mut self,
-        world: &mut WorldData,
-        cid: ClientId,
-        _sender_net_id: u32,
-    ) -> Result<()> {
-        self.connection_info.player_id = world.clients.get(&cid).unwrap().player_id;
+    fn handle_self(mut self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        let client = world.clients.get(&cid).unwrap();
+        self.connection_info.player_id = client.player_id;
+        self.connection_info.bitfield.ready = client.status == ClientStatus::Ready;
         world.clients.broadcast(
             Channel::BroadcastUnreliable,
-            0,
             &SPingLoadInfo {
                 connection_info: self.connection_info,
             },
@@ -166,12 +163,7 @@ impl GamePacketHandler for CPingLoadInfo {
 }
 
 impl GamePacketHandler for CWorldSendCameraServer {
-    fn handle_self(
-        self,
-        _world: &mut WorldData,
-        _cid: ClientId,
-        _sender_net_id: u32,
-    ) -> Result<()> {
+    fn handle_self(self, _world: &mut WorldData, _cid: ClientId, _: u32) -> Result<()> {
         Ok(())
     }
 }

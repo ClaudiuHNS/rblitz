@@ -41,14 +41,14 @@ fn setup_logger() -> Result<(), fern::InitError> {
     fern::Dispatch::new()
         .format(move |out, message, record| {
             out.finish(format_args!(
-                "{color_line}[{date}][{target}/{thread}][{level}{color_line}] {message}\x1B[0m",
+                "{color_line}[{date}][{target}/{thread:?}][{level}{color_line}] {message}\x1B[0m",
                 color_line = format_args!(
                     "\x1B[{}m",
                     colors_line.get_color(&record.level()).to_fg_str()
                 ),
                 date = chrono::Local::now().format("%H:%M:%S"),
                 target = record.target(),
-                thread = std::thread::current().name().unwrap_or_default(),
+                thread = std::thread::current().id(),
                 level = record.level(),
                 message = message,
             ));

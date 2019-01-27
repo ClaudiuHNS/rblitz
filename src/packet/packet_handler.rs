@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 use shred_derive::SystemData;
 use specs::{Read, Resources, System, WriteExpect};
 
+use crate::client::ClientStatus;
 use crate::client::{ClientId, ClientMap};
 use crate::lenet_server::{Event, LENetServer};
 use crate::packet::{
@@ -99,7 +100,7 @@ impl PacketHandler {
         self.register_game_handler::<CPingLoadInfo>();
         self.register_game_handler::<CClientReady>();
         self.register_game_handler::<CWorldSendCameraServer>();
-        self.register_game_handler::<SSendSelectedObjID>();
+        self.register_game_handler::<CSendSelectedObjID>();
     }
 
     fn register_loading_screen_packets(&mut self) {
@@ -111,7 +112,7 @@ impl PacketHandler {
 
 #[derive(SystemData)]
 pub struct WorldData<'a> {
-    pub time: Read<'a, crate::game_server::GameTime>,
+    pub time: Read<'a, crate::resources::GameTime>,
     pub clients: WriteExpect<'a, ClientMap>,
     pub server: WriteExpect<'a, LENetServer>,
 }
@@ -121,27 +122,48 @@ impl<'a> System<'a> for PacketHandler {
 
     fn run(&mut self, mut data: Self::SystemData) {
         // FIXME loop without timeout until no event happens
-        match data.server.service(1) {
-            Ok(event) => match event {
-                Event::Connected(keycheck, peer) => {
-                    if let Some((cid, client)) = data
-                        .clients
-                        .iter_mut()
-                        .find(|(_, c)| c.player_id == keycheck.player_id)
-                    {
-                        if client.auth(*cid, keycheck, peer).is_ok() {
-                            return;
+        loop {
+            match data.server.service(0) {
+                Ok(event) => match event {
+                    Event::Connected(keycheck, peer) => {
+                        let cid = data
+                            .clients
+                            .iter_mut()
+                            .find(|(_, c)| c.player_id == keycheck.player_id)
+                            .and_then(|(cid, client)| {
+                                if client.auth(*cid, keycheck, peer).is_ok() {
+                                    client.status = ClientStatus::Loading;
+                                    Some(*cid)
+                                } else {
+                                    None
+                                }
+                            });
+                        match cid {
+                            Some(cid) => data.clients.broadcast_keycheck(cid),
+                            None => unsafe { enet_sys::enet_peer_disconnect_now(peer, 0) },
                         }
                     }
-                    unsafe { enet_sys::enet_peer_disconnect_now(peer, 0) };
-                }
-                Event::Disconnected(cid) => log::info!("Disconnected: {:?}", cid),
-                Event::Packet(cid, channel, mut packet) => {
-                    self.handle_packet(&mut data, channel, cid, &mut *packet)
-                }
-                Event::NoEvent => (),
-            },
-            Err(e) => log::error!("{:?}", e),
+                    Event::Disconnected(cid) => {
+                        log::info!("Disconnected: {:?}", cid);
+                        let client = data.clients.get_mut(&cid).unwrap();
+                        client.status = ClientStatus::Disconnected;
+                        client.peer = None;
+                        if data
+                            .clients
+                            .values()
+                            .all(|c| c.status == ClientStatus::Disconnected)
+                        {
+                            // shutdown server gracefully
+                            panic!("All players lost connection, terminating server");
+                        }
+                    }
+                    Event::Packet(cid, channel, mut packet) => {
+                        self.handle_packet(&mut data, channel, cid, &mut *packet)
+                    }
+                    Event::NoEvent => break,
+                },
+                Err(e) => log::error!("{:?}", e),
+            }
         }
     }
 

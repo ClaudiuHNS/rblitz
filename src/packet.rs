@@ -7,7 +7,7 @@ pub mod packet_handler;
 #[repr(packed)]
 pub struct KeyCheck {
     pub action: u8,
-    pad: [u8; 3],
+    pub pad: [u8; 3],
     pub client_id: u32,
     pub player_id: u64,
     pub check_id: [u8; 8],

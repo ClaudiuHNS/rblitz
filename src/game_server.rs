@@ -7,11 +7,9 @@ use crate::client::{Client, ClientId, ClientMap};
 use crate::config::PlayerConfig;
 use crate::lenet_server::LENetServer;
 use crate::packet::packet_handler::PacketHandler;
+use crate::resources::GameTime;
 
 const TICK_RATE: f64 = 1.0 / 30.0;
-
-#[derive(Default)]
-pub struct GameTime(pub f64);
 
 pub struct GameServer<'a, 'b> {
     world: World,
@@ -44,7 +42,7 @@ impl GameServer<'_, '_> {
                 .collect::<indexmap::IndexMap<_, _>>(),
         ));
         let mut dispatcher = DispatcherBuilder::new()
-            .with(PacketHandler::new(), "packet_handler", &[])
+            .with_thread_local(PacketHandler::new())
             .build();
         dispatcher.setup(&mut world.res);
         Ok(GameServer { world, dispatcher })
@@ -60,7 +58,8 @@ impl GameServer<'_, '_> {
                 (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64) / 1_000_000_000.0;
             delta_sum += delta;
             self.world.write_resource::<GameTime>().0 += delta;
-            self.dispatcher.dispatch(&self.world.res);
+            self.dispatcher.dispatch_thread_local(&self.world.res);
+            self.dispatcher.dispatch_seq(&self.world.res);
 
             if delta_sum >= TICK_RATE {
                 delta_sum -= TICK_RATE;
@@ -68,6 +67,8 @@ impl GameServer<'_, '_> {
             }
 
             self.world.maintain();
+
+            std::thread::sleep_ms(1);
         }
     }
 

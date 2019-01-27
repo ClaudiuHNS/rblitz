@@ -7,14 +7,19 @@ use crate::config::PlayerConfig;
 use crate::error::{Error, Result};
 use crate::packet::{game::GamePacket, loading_screen::LoadingScreenPacket, Channel, KeyCheck};
 use rblitz_packets::packets::game::common::PlayerLoadInfo;
+use rblitz_packets::packets::game::server::SWorldSendGameNumber;
+use rblitz_packets::packets::loading_screen::{RequestRename, RequestReskin, TeamRosterUpdate};
 
 type Blowfish = block_modes::Ecb<blowfish::Blowfish, block_modes::block_padding::ZeroPadding>;
 
-pub struct ClientMap(indexmap::IndexMap<ClientId, Client>);
+pub struct ClientMap {
+    clients: indexmap::IndexMap<ClientId, Client>,
+    // clients ids which are currently in loading screen
+    //cid_loading: Vec<ClientId>
+}
 
 impl ClientMap {
     pub(super) fn send_roster_update(&mut self, cid: ClientId) {
-        use rblitz_packets::packets::loading_screen::*;
         let mut roster_update = TeamRosterUpdate::default();
         let (mut order_id, mut chaos_id) = (0, 0);
         for (_, client) in self.iter() {
@@ -34,40 +39,68 @@ impl ClientMap {
         roster_update.current_team_size_chaos = chaos_id as u32;
         roster_update.team_size_order = 6; //roster_update.current_team_size_order;
         roster_update.team_size_chaos = 6; //roster_update.current_team_size_chaos;
-
+        let packets = self
+            .values()
+            .map(|c| (Self::make_request_reskin(c), Self::make_request_rename(c)))
+            .collect::<Vec<_>>();
         let client = self.get_mut(&cid).unwrap();
         client.send_loading_screen_packet(&roster_update);
-
-        let mut reskin = RequestReskin::default();
-        reskin.player_id = client.player_id;
-        reskin.skin_id = client.skin_id as u32;
-        reskin.name = client.champion.clone();
-
-        let mut rename = RequestRename::default();
-        rename.player_id = client.player_id;
-        rename.skin_id = client.skin_id as u32;
-        rename.name = client.name.clone();
-
-        self.broadcast_loading_screen(reskin);
-        self.broadcast_loading_screen(rename);
-    }
-
-    fn broadcast_loading_screen<P: LoadingScreenPacket>(&mut self, packet: P) {
-        for c in self.values_mut() {
-            c.send_loading_screen_packet(&packet);
+        for (reskin, rename) in packets {
+            client.send_loading_screen_packet(&reskin);
+            client.send_loading_screen_packet(&rename);
         }
     }
 
-    pub fn broadcast<P: GamePacket>(&mut self, channel: Channel, sender: u32, packet: &P) {
+    fn make_request_rename(client: &Client) -> RequestRename {
+        RequestRename {
+            player_id: client.player_id,
+            skin_id: client.skin_id,
+            name: client.name.clone(),
+            ..Default::default()
+        }
+    }
+
+    fn make_request_reskin(client: &Client) -> RequestReskin {
+        RequestReskin {
+            player_id: client.player_id,
+            skin_id: client.skin_id,
+            name: client.champion.clone(),
+            ..Default::default()
+        }
+    }
+
+    pub fn broadcast<P: GamePacket>(&mut self, channel: Channel, packet: &P) {
         for c in self.values_mut() {
-            c.send_game_packet(channel, sender, packet);
+            c.send_game_packet(channel, packet);
+        }
+    }
+
+    pub fn broadcast_keycheck(&mut self, cid: ClientId) {
+        let packets = self
+            .iter()
+            .filter(|(cid2, _)| **cid2 != cid)
+            .map(|(cid, c)| {
+                let mut check_id = c.player_id.to_le_bytes();
+                c.blowfish().encrypt_nopad(&mut check_id).unwrap();
+                KeyCheck {
+                    action: 0,
+                    pad: [0, 0, 0],
+                    client_id: cid.0,
+                    player_id: c.player_id,
+                    check_id,
+                }
+            })
+            .collect::<Vec<_>>();
+        let client = self.get_mut(&cid).unwrap();
+        for packet in packets {
+            client.send_key_check(packet);
         }
     }
 }
 
 impl From<indexmap::IndexMap<ClientId, Client>> for ClientMap {
     fn from(map: indexmap::IndexMap<ClientId, Client>) -> Self {
-        ClientMap(map)
+        ClientMap { clients: map }
     }
 }
 
@@ -75,13 +108,13 @@ impl ops::Deref for ClientMap {
     type Target = indexmap::IndexMap<ClientId, Client>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.clients
     }
 }
 
 impl ops::DerefMut for ClientMap {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.clients
     }
 }
 
@@ -90,6 +123,14 @@ impl ops::DerefMut for ClientMap {
 pub enum Team {
     Order = 100,
     Chaos = 200,
+}
+
+#[derive(Copy, Clone, PartialOrd, PartialEq)]
+pub enum ClientStatus {
+    Connected,
+    Disconnected,
+    Loading,
+    Ready,
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
@@ -101,12 +142,13 @@ pub struct Client {
     pub name: String,
     pub team: Team,
     pub champion: String,
-    pub skin_id: u8,
+    pub skin_id: u32,
     pub player_id: u64,
     pub summoner_level: u16,
     pub summoner_spell0: u32,
     pub summoner_spell1: u32,
     pub profile_icon: i32,
+    pub status: ClientStatus,
 }
 
 impl Client {
@@ -123,6 +165,7 @@ impl Client {
             summoner_spell0: config.summoner_spell0,
             summoner_spell1: config.summoner_spell1,
             profile_icon: config.profile_icon,
+            status: ClientStatus::Disconnected,
         }
     }
 
@@ -158,7 +201,23 @@ impl Client {
 
         keycheck.client_id = cid.0;
         self.send_key_check(keycheck);
+        self.send_game_packet(Channel::Broadcast, &SWorldSendGameNumber { game_id: 12314 });
         Ok(())
+    }
+
+    pub fn send_key_check(&mut self, mut keycheck: KeyCheck) {
+        log::info!(
+            "sending keycheck to player {} {:?}",
+            self.player_id,
+            keycheck
+        );
+        unsafe {
+            let data = slice::from_raw_parts_mut(
+                &mut keycheck as *mut _ as *mut u8,
+                mem::size_of::<KeyCheck>(),
+            );
+            self.send_data(Channel::Handshake, data);
+        }
     }
 
     // FIXME shitty hack cause of how this blowfish works
@@ -191,18 +250,14 @@ impl Client {
         }
     }
 
-    pub fn send_game_packet<P: GamePacket>(
-        &mut self,
-        channel: Channel,
-        sender_net_id: u32,
-        packet: &P,
-    ) {
+    pub fn send_game_packet<P: GamePacket>(&mut self, channel: Channel, packet: &P) {
         if self.peer.is_some() {
-            log::trace!("[SENT] {:?}", packet);
+            log::trace!("[SENT][{}] {:?}", self.player_id, packet);
             // FIXME cache the data vector in the client to save up on allocations?
             let mut data = Vec::with_capacity(mem::size_of::<P>() + 1 + 4);
             data.push(P::ID);
-            data.extend_from_slice(&sender_net_id.to_le_bytes());
+            //sender_net_id = 0
+            data.extend_from_slice(&[0, 0, 0, 0]);
             rblitz_packets::to_writer(packet, &mut data).unwrap();
             self.send_data(channel, data.as_mut_slice());
         }
@@ -210,23 +265,11 @@ impl Client {
 
     pub fn send_loading_screen_packet<P: LoadingScreenPacket>(&mut self, packet: &P) {
         if self.peer.is_some() {
-            log::trace!("[SENT] {:?}", packet);
+            log::trace!("[SENT][{}] {:?}", self.player_id, packet);
             let mut data = Vec::with_capacity(mem::size_of::<P>() + 1);
             data.push(P::ID);
             rblitz_packets::to_writer(packet, &mut data).unwrap();
             self.send_data(Channel::LoadingScreen, data.as_mut_slice());
-        }
-    }
-
-    pub fn send_key_check(&mut self, mut keycheck: KeyCheck) {
-        unsafe {
-            if self.peer.is_some() {
-                let data = slice::from_raw_parts_mut(
-                    &mut keycheck as *mut _ as *mut u8,
-                    mem::size_of::<KeyCheck>(),
-                );
-                self.send_data(Channel::Handshake, data);
-            }
         }
     }
 }
