@@ -101,6 +101,7 @@ impl PacketHandler {
         self.register_game_handler::<CClientReady>();
         self.register_game_handler::<CWorldSendCameraServer>();
         self.register_game_handler::<CSendSelectedObjID>();
+        self.register_game_handler::<CExit>();
     }
 
     fn register_loading_screen_packets(&mut self) {

@@ -169,6 +169,12 @@ impl Client {
         }
     }
 
+    pub fn disconnect(&mut self) {
+        if let Some(peer) = self.peer.take() {
+            unsafe { enet_sys::enet_peer_disconnect(peer.as_ptr(), 0) }
+        }
+    }
+
     pub fn player_load_info(&self) -> PlayerLoadInfo {
         PlayerLoadInfo {
             player_id: self.player_id,

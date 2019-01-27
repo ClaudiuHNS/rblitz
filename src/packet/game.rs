@@ -119,7 +119,7 @@ impl GamePacketHandler for CClientReady {
 
 impl GamePacketHandler for CCharSelected {
     fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
-        let client = world.clients.get_mut(&cid).unwrap();
+        /*let client = world.clients.get_mut(&cid).unwrap();
         let create_hero = SCreateHero {
             unit_net_id: 0x40000001,
             client_id: cid.0,
@@ -142,22 +142,31 @@ impl GamePacketHandler for CCharSelected {
             },
         );
         client.send_game_packet(Channel::Broadcast, &create_hero);
-        client.send_game_packet(Channel::Broadcast, &SEndSpawn);
+        client.send_game_packet(Channel::Broadcast, &SEndSpawn);*/
         Ok(())
     }
 }
 
+// FIXME for some reason the clients pretty much ignore the percentage value
 impl GamePacketHandler for CPingLoadInfo {
     fn handle_self(mut self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
         let client = world.clients.get(&cid).unwrap();
-        self.connection_info.player_id = client.player_id;
-        self.connection_info.bitfield.ready = client.status == ClientStatus::Ready;
+        let mut connection_info = ConnectionInfo {
+            client_id: cid.0,
+            player_id: client.player_id,
+            ..self.connection_info
+        };
         world.clients.broadcast(
             Channel::BroadcastUnreliable,
-            &SPingLoadInfo {
-                connection_info: self.connection_info,
-            },
+            &SPingLoadInfo { connection_info },
         );
+        Ok(())
+    }
+}
+
+impl GamePacketHandler for CExit {
+    fn handle_self(mut self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        world.clients.get_mut(&cid).unwrap().disconnect();
         Ok(())
     }
 }
