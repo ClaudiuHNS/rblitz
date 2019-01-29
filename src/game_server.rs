@@ -37,6 +37,7 @@ impl GameServer<'_, '_> {
         world.add_resource(ClientMap::from(
             players
                 .into_iter()
+                .take(12)
                 .enumerate()
                 .map(|(cid, p)| (ClientId(cid as u32), Client::new(p)))
                 .collect::<indexmap::IndexMap<_, _>>(),

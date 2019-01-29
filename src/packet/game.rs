@@ -6,20 +6,15 @@ use rblitz_packets::{
     PacketId,
 };
 
-use crate::client::ClientStatus;
-use crate::client::Team;
-use crate::packet::packet_handler::WorldData;
-use crate::{client::ClientId, error::Result, packet::Channel};
+use crate::client::{ClientId, ClientStatus, Team};
+use crate::error::Result;
+use crate::packet::{packet_handler::WorldData, Channel};
 
 pub type GameHandler = fn(&mut WorldData, ClientId, u32, &[u8]) -> Result<()>;
 
-pub trait GamePacket: PacketId + Serialize + std::fmt::Debug
-where
-    Self: for<'de> Deserialize<'de>,
-{
-}
+pub trait GamePacket: PacketId + Serialize + std::fmt::Debug {}
 
-pub trait GamePacketHandler: GamePacket {
+pub trait GamePacketHandler: GamePacket + for<'de> Deserialize<'de> {
     fn handle(world: &mut WorldData, cid: ClientId, sender_net_id: u32, data: &[u8]) -> Result<()> {
         let this = rblitz_packets::from_bytes::<Self>(data)?;
         log::trace!("[RECEIVED] {:?}", this);
@@ -46,7 +41,7 @@ impl<'a> RawGamePacket<'a> {
 }
 
 // implements it on loading screen packets as well /shrug
-impl<T> GamePacket for T where T: PacketId + Serialize + std::fmt::Debug + for<'de> Deserialize<'de> {}
+impl<T> GamePacket for T where T: PacketId + Serialize + std::fmt::Debug {}
 
 impl GamePacketHandler for CQueryStatusReq {
     fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
@@ -119,7 +114,7 @@ impl GamePacketHandler for CClientReady {
 
 impl GamePacketHandler for CCharSelected {
     fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
-        /*let client = world.clients.get_mut(&cid).unwrap();
+        let client = world.clients.get_mut(&cid).unwrap();
         let create_hero = SCreateHero {
             unit_net_id: 0x40000001,
             client_id: cid.0,
@@ -142,30 +137,29 @@ impl GamePacketHandler for CCharSelected {
             },
         );
         client.send_game_packet(Channel::Broadcast, &create_hero);
-        client.send_game_packet(Channel::Broadcast, &SEndSpawn);*/
+        client.send_game_packet(Channel::Broadcast, &SEndSpawn);
         Ok(())
     }
 }
 
-// FIXME for some reason the clients pretty much ignore the percentage value
+// Turns out riot is just horrible and use some weird interpolation for the loading percentage
+// client side which results in completely inaccurate loading progression
 impl GamePacketHandler for CPingLoadInfo {
     fn handle_self(mut self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
         let client = world.clients.get(&cid).unwrap();
-        let mut connection_info = ConnectionInfo {
-            client_id: cid.0,
-            player_id: client.player_id,
-            ..self.connection_info
-        };
+        self.connection_info.player_id = client.player_id;
         world.clients.broadcast(
-            Channel::BroadcastUnreliable,
-            &SPingLoadInfo { connection_info },
+            Channel::Broadcast,
+            &SPingLoadInfo {
+                connection_info: self.connection_info,
+            },
         );
         Ok(())
     }
 }
 
 impl GamePacketHandler for CExit {
-    fn handle_self(mut self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
         world.clients.get_mut(&cid).unwrap().disconnect();
         Ok(())
     }

@@ -1,21 +1,20 @@
 use block_modes::BlockMode;
 use enet_sys as enet;
+use rblitz_packets::packets::{
+    game::{common::PlayerLoadInfo, server::SWorldSendGameNumber},
+    loading_screen::{RequestRename, RequestReskin, TeamRosterUpdate},
+};
 
 use core::{cell::UnsafeCell, mem, ops, ptr::NonNull, slice};
 
 use crate::config::PlayerConfig;
 use crate::error::{Error, Result};
 use crate::packet::{game::GamePacket, loading_screen::LoadingScreenPacket, Channel, KeyCheck};
-use rblitz_packets::packets::game::common::PlayerLoadInfo;
-use rblitz_packets::packets::game::server::SWorldSendGameNumber;
-use rblitz_packets::packets::loading_screen::{RequestRename, RequestReskin, TeamRosterUpdate};
 
 type Blowfish = block_modes::Ecb<blowfish::Blowfish, block_modes::block_padding::ZeroPadding>;
 
 pub struct ClientMap {
     clients: indexmap::IndexMap<ClientId, Client>,
-    // clients ids which are currently in loading screen
-    //cid_loading: Vec<ClientId>
 }
 
 impl ClientMap {
