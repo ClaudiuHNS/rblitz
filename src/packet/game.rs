@@ -6,20 +6,19 @@ use rblitz_packets::{
     PacketId,
 };
 
-use crate::packet::packet_handler::WorldData;
-use crate::{client::ClientId, error::Result, packet::Channel};
+use crate::client::{ClientId, ClientStatus, Team};
+use crate::error::Result;
+use crate::packet::{packet_handler::WorldData, Channel};
 
 pub type GameHandler = fn(&mut WorldData, ClientId, u32, &[u8]) -> Result<()>;
 
-pub trait GamePacket: PacketId + Serialize
-where
-    Self: for<'de> Deserialize<'de>,
-{
-}
+pub trait GamePacket: PacketId + Serialize + std::fmt::Debug {}
 
-pub trait GamePacketHandler: GamePacket {
+pub trait GamePacketHandler: GamePacket + for<'de> Deserialize<'de> {
     fn handle(world: &mut WorldData, cid: ClientId, sender_net_id: u32, data: &[u8]) -> Result<()> {
-        rblitz_packets::from_bytes::<Self>(data)?.handle_self(world, cid, sender_net_id)
+        let this = rblitz_packets::from_bytes::<Self>(data)?;
+        log::trace!("[RECEIVED] {:?}", this);
+        this.handle_self(world, cid, sender_net_id)
     }
     fn handle_self(self, world: &mut WorldData, cid: ClientId, sender_net_id: u32) -> Result<()>;
 }
@@ -42,49 +41,51 @@ impl<'a> RawGamePacket<'a> {
 }
 
 // implements it on loading screen packets as well /shrug
-impl<T> GamePacket for T where T: PacketId + Serialize + for<'de> Deserialize<'de> {}
+impl<T> GamePacket for T where T: PacketId + Serialize + std::fmt::Debug {}
 
 impl GamePacketHandler for CQueryStatusReq {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
-        world.clients.get_mut(&cid).unwrap().send_game_packet(
-            Channel::Broadcast,
-            cid.0,
-            SQueryStatusAns { is_ok: true },
-        );
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        world
+            .clients
+            .get_mut(&cid)
+            .unwrap()
+            .send_game_packet(Channel::Broadcast, &SQueryStatusAns { is_ok: true });
         Ok(())
     }
 }
 
 impl GamePacketHandler for CReconnect {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
-        world.clients.get_mut(&cid).unwrap().send_game_packet(
-            Channel::ClientToServer,
-            cid.0,
-            SReconnect { client_id: cid.0 },
-        );
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        world
+            .clients
+            .get_mut(&cid)
+            .unwrap()
+            .send_game_packet(Channel::ClientToServer, &SReconnect { client_id: cid.0 });
+        Ok(())
+    }
+}
+
+impl GamePacketHandler for CSendSelectedObjID {
+    fn handle_self(self, _world: &mut WorldData, _cid: ClientId, _: u32) -> Result<()> {
         Ok(())
     }
 }
 
 impl GamePacketHandler for CSyncVersion {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
         let mut player_info: [PlayerLoadInfo; 12] = Default::default();
-        player_info[0] = PlayerLoadInfo {
-            player_id: u64::from(cid.0),
-            summoner_level: 30,
-            summoner_spell1: 0x06496EA8,
-            summoner_spell2: 0x06496EA8,
-            ..Default::default()
-        };
+        for (load_info, client) in player_info.iter_mut().zip(world.clients.values()) {
+            *load_info = client.player_load_info();
+        }
+
         world.clients.get_mut(&cid).unwrap().send_game_packet(
             Channel::Broadcast,
-            cid.0,
-            SSyncVersion {
+            &SSyncVersion {
                 is_version_ok: true,
-                map: 8,
+                map: 8, //todo replace with world.read_resource::<Map>().id
                 player_info,
                 version_string: self.version,
-                map_mode: "Automatic".to_owned(),
+                map_mode: "ODIN".to_owned(),
             },
         );
         Ok(())
@@ -92,58 +93,80 @@ impl GamePacketHandler for CSyncVersion {
 }
 
 impl GamePacketHandler for CClientReady {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
-        world.clients.get_mut(&cid).unwrap().send_game_packet(
-            Channel::Broadcast,
-            cid.0,
-            SStartGame {
-                tournament_pause_enabled: false,
-            },
-        );
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        let clients = &mut world.clients;
+        clients.get_mut(&cid).unwrap().status = ClientStatus::Ready;
+        if clients.values().all(|c| c.status == ClientStatus::Ready) {
+            log::info!("All clients ready, starting game");
+            clients.broadcast(
+                Channel::Broadcast,
+                &SStartGame {
+                    tournament_pause_enabled: false,
+                },
+            );
+            clients
+                .values_mut()
+                .for_each(|c| c.status = ClientStatus::Connected);
+        }
         Ok(())
     }
 }
 
 impl GamePacketHandler for CCharSelected {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
         let client = world.clients.get_mut(&cid).unwrap();
         let create_hero = SCreateHero {
             unit_net_id: 0x40000001,
             client_id: cid.0,
             net_node_id: 0x40,
             skill_level: 1,
-            team_is_order: true,
+            team_is_order: client.team == Team::Order,
             is_bot: false,
             bot_rank: 0,
             spawn_position_index: 0,
-            skin_id: 0,
-            name: "RBlitzTest".to_owned(),
-            skin: "Nasus".to_owned(),
+            skin_id: client.skin_id as u32,
+            name: client.name.clone(),
+            skin: client.champion.clone(),
         };
 
         client.send_game_packet(
             Channel::Broadcast,
-            cid.0,
-            SStartSpawn {
+            &SStartSpawn {
                 bot_count_order: 0,
                 bot_count_chaos: 0,
             },
         );
-        client.send_game_packet(Channel::Broadcast, cid.0, create_hero);
-        client.send_game_packet(Channel::Broadcast, cid.0, SEndSpawn);
+        client.send_game_packet(Channel::Broadcast, &create_hero);
+        client.send_game_packet(Channel::Broadcast, &SEndSpawn);
         Ok(())
     }
 }
 
+// Turns out riot is just horrible and use some weird interpolation for the loading percentage
+// client side which results in completely inaccurate loading progression
 impl GamePacketHandler for CPingLoadInfo {
-    fn handle_self(self, world: &mut WorldData, cid: ClientId, _sender_net_id: u32) -> Result<()> {
-        world.clients.get_mut(&cid).unwrap().send_game_packet(
+    fn handle_self(mut self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        let client = world.clients.get(&cid).unwrap();
+        self.connection_info.player_id = client.player_id;
+        world.clients.broadcast(
             Channel::Broadcast,
-            cid.0,
-            SPingLoadInfo {
+            &SPingLoadInfo {
                 connection_info: self.connection_info,
             },
         );
+        Ok(())
+    }
+}
+
+impl GamePacketHandler for CExit {
+    fn handle_self(self, world: &mut WorldData, cid: ClientId, _: u32) -> Result<()> {
+        world.clients.get_mut(&cid).unwrap().disconnect();
+        Ok(())
+    }
+}
+
+impl GamePacketHandler for CWorldSendCameraServer {
+    fn handle_self(self, _world: &mut WorldData, _cid: ClientId, _: u32) -> Result<()> {
         Ok(())
     }
 }

@@ -4,13 +4,12 @@ use std::net::Ipv4Addr;
 use std::time::Instant;
 
 use crate::client::{Client, ClientId, ClientMap};
+use crate::config::PlayerConfig;
 use crate::lenet_server::LENetServer;
 use crate::packet::packet_handler::PacketHandler;
+use crate::resources::GameTime;
 
 const TICK_RATE: f64 = 1.0 / 30.0;
-
-#[derive(Default)]
-pub struct GameTime(pub f64);
 
 pub struct GameServer<'a, 'b> {
     world: World,
@@ -30,18 +29,21 @@ fn to_enet_address(address: Ipv4Addr, port: u16) -> enet_sys::ENetAddress {
 }
 
 impl GameServer<'_, '_> {
-    pub fn new(address: Ipv4Addr, port: u16, keys: [(u32, [u8; 16]); 12]) -> Result<Self, ()> {
+    pub fn new(address: Ipv4Addr, port: u16, players: Vec<PlayerConfig>) -> Result<Self, ()> {
         let server = LENetServer::new(to_enet_address(address, port));
         let mut world = World::new();
         world.add_resource(GameTime(0.0));
         world.add_resource(server);
-        world.add_resource(
-            keys.iter()
-                .map(|(cid, key)| (ClientId(*cid), Client::new(&key[..])))
-                .collect::<ClientMap>(),
-        );
+        world.add_resource(ClientMap::from(
+            players
+                .into_iter()
+                .take(12)
+                .enumerate()
+                .map(|(cid, p)| (ClientId(cid as u32), Client::new(p)))
+                .collect::<indexmap::IndexMap<_, _>>(),
+        ));
         let mut dispatcher = DispatcherBuilder::new()
-            .with(PacketHandler::new(), "packet_handler", &[])
+            .with_thread_local(PacketHandler::new())
             .build();
         dispatcher.setup(&mut world.res);
         Ok(GameServer { world, dispatcher })
@@ -57,7 +59,8 @@ impl GameServer<'_, '_> {
                 (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64) / 1_000_000_000.0;
             delta_sum += delta;
             self.world.write_resource::<GameTime>().0 += delta;
-            self.dispatcher.dispatch(&self.world.res);
+            self.dispatcher.dispatch_thread_local(&self.world.res);
+            self.dispatcher.dispatch_seq(&self.world.res);
 
             if delta_sum >= TICK_RATE {
                 delta_sum -= TICK_RATE;
@@ -65,6 +68,8 @@ impl GameServer<'_, '_> {
             }
 
             self.world.maintain();
+
+            std::thread::sleep_ms(1);
         }
     }
 
