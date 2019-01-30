@@ -7,8 +7,11 @@ license = "AGPL-3.0"
 description = "legoland private server"
 publish = false
 
+[dependencies.rblitz_packets]
+path = "./rblitz_packets"
+version = "0.1.0"
+
 [dependencies]
-rblitz_packets = { git = "https://github.com/Veykril/rblitz_packets", rev = "f80dc17" }
 fern = { version = "0.5", features = ["colored"] }
 log = "0.4.6"
 enet-sys = { path = "./enet-sys" }
