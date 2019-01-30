@@ -6,14 +6,14 @@
 pub(in crate) mod bit_bool {
     use serde::Deserialize;
     pub fn deserialize<'de, D>(d: D) -> Result<bool, D::Error>
-        where
-            D: serde::Deserializer<'de>,
+    where
+        D: serde::Deserializer<'de>,
     {
         u8::deserialize(d).map(|byte| byte & 1 != 0)
     }
     pub fn serialize<S>(b: &bool, s: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
+    where
+        S: serde::Serializer,
     {
         s.serialize_u8(*b as u8)
     }

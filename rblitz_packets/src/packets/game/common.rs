@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub use super::bitfield::*;
 
-use crate::Vector2;
-use crate::Vector3;
+use crate::{Vector2, Vector3};
 use indexmap::IndexMap;
 
 // todo

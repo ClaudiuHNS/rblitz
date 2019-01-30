@@ -13,9 +13,11 @@ pub(in crate) mod util;
 pub use crate::packets::PacketId;
 pub(in crate) use crate::util::*;
 
-pub use self::de::{from_bytes, Deserializer};
-pub use self::error::{Error, Result};
-pub use self::ser::{to_bytes, to_writer, Serializer};
+pub use self::{
+    de::{from_bytes, Deserializer},
+    error::{Error, Result},
+    ser::{to_bytes, to_writer, Serializer},
+};
 
 use serde::{Deserialize, Serialize};
 

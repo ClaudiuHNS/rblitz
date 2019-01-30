@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use super::bitfield::{
-    CharSpawnPetBitfield, ShieldProperties, SpawnMinionBitfield, SpellSlotBitfield,
+use super::{
+    bitfield::{CharSpawnPetBitfield, ShieldProperties, SpawnMinionBitfield, SpellSlotBitfield},
+    packet_id,
 };
-use super::packet_id;
-use crate::packets::game::common::*;
-use crate::{Vector2, Vector3};
+use crate::{packets::game::common::*, Vector2, Vector3};
 use indexmap::IndexMap;
 
 #[packet_id(0x02)]

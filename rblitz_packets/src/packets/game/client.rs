@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::common::ConnectionInfo;
-use super::packet_id;
+use super::{common::ConnectionInfo, packet_id};
 use crate::Vector3;
 
 #[packet_id(0x05)]
