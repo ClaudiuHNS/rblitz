@@ -6,9 +6,11 @@ use rblitz_packets::{
     PacketId,
 };
 
-use crate::client::{ClientId, ClientStatus, Team};
-use crate::error::Result;
-use crate::packet::{packet_handler::WorldData, Channel};
+use crate::{
+    client::{ClientId, ClientStatus, Team},
+    error::Result,
+    packet::{packet_handler::WorldData, Channel},
+};
 
 pub type GameHandler = fn(&mut WorldData, ClientId, u32, &[u8]) -> Result<()>;
 

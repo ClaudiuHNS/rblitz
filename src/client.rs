@@ -7,9 +7,11 @@ use rblitz_packets::packets::{
 
 use core::{cell::UnsafeCell, mem, ops, ptr::NonNull, slice};
 
-use crate::config::PlayerConfig;
-use crate::error::{Error, Result};
-use crate::packet::{game::GamePacket, loading_screen::LoadingScreenPacket, Channel, KeyCheck};
+use crate::{
+    config::PlayerConfig,
+    error::{Error, Result},
+    packet::{game::GamePacket, loading_screen::LoadingScreenPacket, Channel, KeyCheck},
+};
 
 type Blowfish = block_modes::Ecb<blowfish::Blowfish, block_modes::block_padding::ZeroPadding>;
 

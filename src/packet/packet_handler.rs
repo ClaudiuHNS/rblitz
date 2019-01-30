@@ -2,11 +2,13 @@ use indexmap::IndexMap;
 use shred_derive::SystemData;
 use specs::{Read, Resources, System, WriteExpect};
 
-use crate::client::{ClientId, ClientMap, ClientStatus};
-use crate::lenet_server::{Event, LENetServer};
-use crate::packet::{
-    game::{GameHandler, GamePacketHandler, RawGamePacket},
-    Channel,
+use crate::{
+    client::{ClientId, ClientMap, ClientStatus},
+    lenet_server::{Event, LENetServer},
+    packet::{
+        game::{GameHandler, GamePacketHandler, RawGamePacket},
+        Channel,
+    },
 };
 
 pub struct PacketHandler {

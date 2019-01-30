@@ -1,13 +1,14 @@
 use specs::{Dispatcher, DispatcherBuilder, World};
 
-use std::net::Ipv4Addr;
-use std::time::Instant;
+use std::{net::Ipv4Addr, time::Instant};
 
-use crate::client::{Client, ClientId, ClientMap};
-use crate::config::PlayerConfig;
-use crate::lenet_server::LENetServer;
-use crate::packet::packet_handler::PacketHandler;
-use crate::resources::GameTime;
+use crate::{
+    client::{Client, ClientId, ClientMap},
+    config::PlayerConfig,
+    lenet_server::LENetServer,
+    packet::packet_handler::PacketHandler,
+    resources::GameTime,
+};
 
 const TICK_RATE: f64 = 1.0 / 30.0;
 
