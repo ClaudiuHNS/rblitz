@@ -12,7 +12,7 @@ matrix:
     before_script:
     - rustup component add rustfmt
     script:
-    - cargo fmt --all -- --check --unstable-features
+    - cargo fmt --all -- --check
   allow_failures:
   - rust: nightly
   fast_finish: true
