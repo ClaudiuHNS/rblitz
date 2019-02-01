@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
+use shred::DynamicSystemData;
 use shred_derive::SystemData;
-use specs::{Read, Resources, System, WriteExpect};
+use specs::{Read, ReadStorage, Resources, System, WriteExpect};
 
 use crate::{
     client::{ClientId, ClientMap, ClientStatus},
@@ -8,6 +9,10 @@ use crate::{
     packet::{
         game::{GameHandler, GamePacketHandler, RawGamePacket},
         Channel,
+    },
+    world::{
+        components::{NetId, SummonerSpells, Team, UnitName},
+        resources::GameTime,
     },
 };
 
@@ -18,7 +23,7 @@ pub struct PacketHandler {
 impl PacketHandler {
     pub fn new() -> Self {
         PacketHandler {
-            game_handlers: IndexMap::with_capacity(32),
+            game_handlers: IndexMap::new(),
         }
     }
 
@@ -53,13 +58,15 @@ impl PacketHandler {
             Channel::LoadingScreen => {
                 use rblitz_packets::packets::{loading_screen::RequestJoinTeam, PacketId};
                 if !data.is_empty() && RequestJoinTeam::ID == data[0] {
-                    world.clients.send_roster_update(cid);
+                    world
+                        .clients
+                        .send_roster_update(&world.unit_names, &world.teams, cid);
                 }
             }
         }
     }
 
-    pub fn register_game_handler<P>(&mut self)
+    fn register_game_handler<P>(&mut self)
     where
         P: GamePacketHandler,
     {
@@ -72,6 +79,8 @@ impl PacketHandler {
     }
 
     fn register_game_packet_handlers(&mut self) {
+        self.game_handlers.reserve(8);
+
         use rblitz_packets::packets::game::{request::*, *};
         self.register_game_handler::<CQueryStatusReq>();
         self.register_game_handler::<CSyncVersion>();
@@ -86,9 +95,15 @@ impl PacketHandler {
 
 #[derive(SystemData)]
 pub struct WorldData<'a> {
-    pub time: Read<'a, crate::resources::GameTime>,
+    pub time: Read<'a, GameTime>,
     pub clients: WriteExpect<'a, ClientMap>,
     pub server: WriteExpect<'a, LENetServer>,
+    pub unit_names: ReadStorage<'a, UnitName>,
+    pub net_ids: ReadStorage<'a, NetId>,
+    pub teams: ReadStorage<'a, Team>,
+    pub summoner_spells: ReadStorage<'a, SummonerSpells>,
+    // this could possibly all be replaced by just using shred::Resources?
+    // but then
 }
 
 impl<'a> System<'a> for PacketHandler {
@@ -140,8 +155,8 @@ impl<'a> System<'a> for PacketHandler {
         }
     }
 
-    fn setup(&mut self, _res: &mut Resources) {
-        //Self::SystemData::setup(res);
+    fn setup(&mut self, res: &mut Resources) {
+        <Self::SystemData as DynamicSystemData>::setup(&self.accessor(), res);
         self.register_game_packet_handlers();
     }
 }

@@ -23,21 +23,21 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default, PartialOrd, PartialEq)]
 pub struct Vector2 {
-    x: f32,
-    y: f32,
+    pub x: f32,
+    pub y: f32,
 }
 
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default, PartialOrd, PartialEq)]
 pub struct Vector3 {
-    x: f32,
-    y: f32,
-    z: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default, PartialOrd, PartialEq)]
 pub struct Vector4 {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
 }

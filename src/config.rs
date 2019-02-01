@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::client::Team;
+use crate::world::components::Team;
 use std::{fs, io, path::Path};
 
 #[derive(Deserialize)]

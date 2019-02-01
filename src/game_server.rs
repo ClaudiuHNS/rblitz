@@ -3,11 +3,14 @@ use specs::{Dispatcher, DispatcherBuilder, World};
 use std::{net::Ipv4Addr, time::Instant};
 
 use crate::{
-    client::{Client, ClientId, ClientMap},
+    client::ClientMap,
     config::PlayerConfig,
     lenet_server::LENetServer,
     packet::packet_handler::PacketHandler,
-    resources::GameTime,
+    world::{
+        components::{NetId, Team},
+        resources::GameTime,
+    },
 };
 
 const TICK_RATE: f64 = 1.0 / 30.0;
@@ -35,18 +38,12 @@ impl GameServer<'_, '_> {
         let mut world = World::new();
         world.add_resource(GameTime(0.0));
         world.add_resource(server);
-        world.add_resource(ClientMap::from(
-            players
-                .into_iter()
-                .take(12)
-                .enumerate()
-                .map(|(cid, p)| (ClientId(cid as u32), Client::new(p)))
-                .collect::<indexmap::IndexMap<_, _>>(),
-        ));
+        world.register::<NetId>();
         let mut dispatcher = DispatcherBuilder::new()
             .with_thread_local(PacketHandler::new())
             .build();
         dispatcher.setup(&mut world.res);
+        ClientMap::init_from_config(&mut world, players);
         Ok(GameServer { world, dispatcher })
     }
 

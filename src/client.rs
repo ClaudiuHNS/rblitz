@@ -1,9 +1,10 @@
 use block_modes::BlockMode;
 use enet_sys as enet;
 use rblitz_packets::packets::{
-    game::{common::PlayerLoadInfo, server::SWorldSendGameNumber},
+    game::server::SWorldSendGameNumber,
     loading_screen::{RequestRename, RequestReskin, TeamRosterUpdate},
 };
+use specs::{world::Builder, Entity, ReadStorage, World};
 
 use core::{cell::UnsafeCell, mem, ops, ptr::NonNull, slice};
 
@@ -11,6 +12,7 @@ use crate::{
     config::PlayerConfig,
     error::{Error, Result},
     packet::{game::GamePacket, loading_screen::LoadingScreenPacket, Channel, KeyCheck},
+    world::components::{NetId, SummonerSpells, Team, UnitName},
 };
 
 type Blowfish = block_modes::Ecb<blowfish::Blowfish, block_modes::block_padding::ZeroPadding>;
@@ -20,11 +22,46 @@ pub struct ClientMap {
 }
 
 impl ClientMap {
-    pub(super) fn send_roster_update(&mut self, cid: ClientId) {
+    pub fn init_from_config(world: &mut World, players: Vec<PlayerConfig>) {
+        let mut clients = players
+            .into_iter()
+            .take(12)
+            .enumerate()
+            .map(|(cid, p)| {
+                let ent = world
+                    .create_entity()
+                    .with(NetId::new_spawned(cid as u32 + 1))
+                    .with(p.team)
+                    .with(UnitName(p.champion))
+                    .with(SummonerSpells(p.summoner_spell0, p.summoner_spell1))
+                    .build();
+                (
+                    ClientId(cid as u32),
+                    Client::new(
+                        &p.key.as_bytes()[..16],
+                        ent,
+                        p.name,
+                        p.profile_icon,
+                        p.summoner_level,
+                        p.player_id,
+                        p.skin_id,
+                    ),
+                )
+            })
+            .collect::<indexmap::IndexMap<_, _>>();
+        world.add_resource(ClientMap { clients });
+    }
+
+    pub(super) fn send_roster_update(
+        &mut self,
+        unit_names: &ReadStorage<UnitName>,
+        teams: &ReadStorage<Team>,
+        cid: ClientId,
+    ) {
         let mut roster_update = TeamRosterUpdate::default();
         let (mut order_id, mut chaos_id) = (0, 0);
         for (_, client) in self.iter() {
-            match client.team {
+            match *teams.get(client.champion).unwrap() {
                 Team::Order => {
                     roster_update.order_player_ids[order_id] = client.player_id;
                     order_id += 1;
@@ -42,7 +79,22 @@ impl ClientMap {
         roster_update.team_size_chaos = 6; //roster_update.current_team_size_chaos;
         let packets = self
             .values()
-            .map(|c| (Self::make_request_reskin(c), Self::make_request_rename(c)))
+            .map(|client| {
+                (
+                    RequestReskin {
+                        player_id: client.player_id,
+                        skin_id: client.champ_skin_id,
+                        name: unit_names.get(client.champion).unwrap().0.clone(),
+                        ..Default::default()
+                    },
+                    RequestRename {
+                        player_id: client.player_id,
+                        skin_id: client.champ_skin_id,
+                        name: client.name.clone(),
+                        ..Default::default()
+                    },
+                )
+            })
             .collect::<Vec<_>>();
         let client = self.get_mut(&cid).unwrap();
         client.send_loading_screen_packet(&roster_update);
@@ -52,27 +104,9 @@ impl ClientMap {
         }
     }
 
-    fn make_request_rename(client: &Client) -> RequestRename {
-        RequestRename {
-            player_id: client.player_id,
-            skin_id: client.skin_id,
-            name: client.name.clone(),
-            ..Default::default()
-        }
-    }
-
-    fn make_request_reskin(client: &Client) -> RequestReskin {
-        RequestReskin {
-            player_id: client.player_id,
-            skin_id: client.skin_id,
-            name: client.champion.clone(),
-            ..Default::default()
-        }
-    }
-
-    pub fn broadcast<P: GamePacket>(&mut self, channel: Channel, packet: &P) {
+    pub fn broadcast<P: GamePacket>(&mut self, sender_net_id: u32, channel: Channel, packet: &P) {
         for c in self.values_mut() {
-            c.send_game_packet(channel, packet);
+            c.send_game_packet(sender_net_id, channel, packet);
         }
     }
 
@@ -119,13 +153,6 @@ impl ops::DerefMut for ClientMap {
     }
 }
 
-#[repr(u32)]
-#[derive(serde::Deserialize, Copy, Clone, PartialOrd, PartialEq)]
-pub enum Team {
-    Order = 100,
-    Chaos = 200,
-}
-
 #[derive(Copy, Clone, PartialOrd, PartialEq)]
 pub enum ClientStatus {
     Connected,
@@ -141,53 +168,40 @@ pub struct Client {
     pub peer: Option<NonNull<enet::ENetPeer>>,
     blowfish: UnsafeCell<Blowfish>,
     pub name: String,
-    pub team: Team,
-    pub champion: String,
-    pub skin_id: u32,
     pub player_id: u64,
     pub summoner_level: u16,
-    pub summoner_spell0: u32,
-    pub summoner_spell1: u32,
     pub profile_icon: i32,
     pub status: ClientStatus,
+    pub champ_skin_id: u32,
+    pub champion: Entity,
 }
 
 impl Client {
-    pub fn new(config: PlayerConfig) -> Self {
+    pub fn new(
+        key: &[u8],
+        champion: Entity,
+        name: String,
+        profile_icon: i32,
+        summoner_level: u16,
+        player_id: u64,
+        skin_id: u32,
+    ) -> Self {
         Client {
             peer: None,
-            blowfish: UnsafeCell::new(Blowfish::new_varkey(&config.key.as_bytes()[..16]).unwrap()),
-            team: config.team,
-            name: config.name,
-            champion: config.champion,
-            skin_id: config.skin_id,
-            player_id: config.player_id,
-            summoner_level: config.summoner_level,
-            summoner_spell0: config.summoner_spell0,
-            summoner_spell1: config.summoner_spell1,
-            profile_icon: config.profile_icon,
+            blowfish: UnsafeCell::new(Blowfish::new_varkey(key).unwrap()),
+            name,
+            player_id,
+            summoner_level,
+            profile_icon,
             status: ClientStatus::Disconnected,
+            champ_skin_id: skin_id,
+            champion,
         }
     }
 
     pub fn disconnect(&mut self) {
         if let Some(peer) = self.peer.take() {
             unsafe { enet_sys::enet_peer_disconnect(peer.as_ptr(), 0) }
-        }
-    }
-
-    pub fn player_load_info(&self) -> PlayerLoadInfo {
-        PlayerLoadInfo {
-            player_id: self.player_id,
-            summoner_level: self.summoner_level,
-            summoner_spell1: self.summoner_spell0,
-            summoner_spell2: self.summoner_spell1,
-            is_bot: false,
-            team_id: self.team as u32,
-            _pad0: Default::default(),
-            _pad1: Default::default(),
-            bot_difficulty: 0,
-            profile_icon_id: self.profile_icon,
         }
     }
 
@@ -208,7 +222,11 @@ impl Client {
 
         keycheck.client_id = cid.0;
         self.send_key_check(keycheck);
-        self.send_game_packet(Channel::Broadcast, &SWorldSendGameNumber { game_id: 12314 });
+        self.send_game_packet(
+            0,
+            Channel::Broadcast,
+            &SWorldSendGameNumber { game_id: 12314 },
+        );
         Ok(())
     }
 
@@ -257,14 +275,18 @@ impl Client {
         }
     }
 
-    pub fn send_game_packet<P: GamePacket>(&mut self, channel: Channel, packet: &P) {
+    pub fn send_game_packet<P: GamePacket>(
+        &mut self,
+        sender_net_id: u32,
+        channel: Channel,
+        packet: &P,
+    ) {
         if self.peer.is_some() {
             log::trace!("[SENT][{}] {:?}", self.player_id, packet);
             // FIXME cache the data vector in the client to save up on allocations?
             let mut data = Vec::with_capacity(mem::size_of::<P>() + 1 + 4);
             data.push(P::ID);
-            //sender_net_id = 0
-            data.extend_from_slice(&[0, 0, 0, 0]);
+            data.extend_from_slice(&sender_net_id.to_le_bytes());
             rblitz_packets::to_writer(packet, &mut data).unwrap();
             self.send_data(channel, data.as_mut_slice());
         }
