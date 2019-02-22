@@ -3,17 +3,22 @@ use specs::{Dispatcher, DispatcherBuilder, World};
 use std::{net::Ipv4Addr, time::Instant};
 
 use crate::{
-    client::{Client, ClientId, ClientMap},
+    client::ClientMap,
     config::PlayerConfig,
     lenet_server::LENetServer,
-    packet::packet_handler::PacketHandler,
-    resources::GameTime,
+    packet::packet_handler_system::PacketHandlerSys,
+    world::{
+        components::{NetId, SummonerSpells, Team, UnitName},
+        resources::GameTime,
+    },
 };
 
 const TICK_RATE: f64 = 1.0 / 30.0;
 
 pub struct GameServer<'a, 'b> {
     world: World,
+    server: LENetServer,
+    packet_handler: PacketHandlerSys<'a>,
     dispatcher: Dispatcher<'a, 'b>,
 }
 
@@ -29,25 +34,24 @@ fn to_enet_address(address: Ipv4Addr, port: u16) -> enet_sys::ENetAddress {
     }
 }
 
-impl GameServer<'_, '_> {
+impl<'a, 'b> GameServer<'a, 'b> {
     pub fn new(address: Ipv4Addr, port: u16, players: Vec<PlayerConfig>) -> Result<Self, ()> {
         let server = LENetServer::new(to_enet_address(address, port));
         let mut world = World::new();
         world.add_resource(GameTime(0.0));
-        world.add_resource(server);
-        world.add_resource(ClientMap::from(
-            players
-                .into_iter()
-                .take(12)
-                .enumerate()
-                .map(|(cid, p)| (ClientId(cid as u32), Client::new(p)))
-                .collect::<indexmap::IndexMap<_, _>>(),
-        ));
-        let mut dispatcher = DispatcherBuilder::new()
-            .with_thread_local(PacketHandler::new())
-            .build();
+        world.register::<NetId>();
+        world.register::<Team>();
+        world.register::<UnitName>();
+        world.register::<SummonerSpells>();
+        let mut dispatcher = DispatcherBuilder::new().build();
         dispatcher.setup(&mut world.res);
-        Ok(GameServer { world, dispatcher })
+        ClientMap::init_from_config(&mut world, players);
+        Ok(GameServer {
+            world,
+            packet_handler: PacketHandlerSys::new(),
+            server,
+            dispatcher,
+        })
     }
 
     pub fn run(&mut self) {
@@ -60,8 +64,9 @@ impl GameServer<'_, '_> {
                 (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64) / 1_000_000_000.0;
             delta_sum += delta;
             self.world.write_resource::<GameTime>().0 += delta;
-            self.dispatcher.dispatch_thread_local(&self.world.res);
+            self.packet_handler.run(&mut self.server, &self.world);
             self.dispatcher.dispatch_seq(&self.world.res);
+            self.dispatcher.dispatch_thread_local(&self.world.res);
 
             if delta_sum >= TICK_RATE {
                 delta_sum -= TICK_RATE;

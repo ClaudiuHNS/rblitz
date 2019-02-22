@@ -36,6 +36,58 @@ pub(in crate) mod f8 {
     }
 }
 
+pub(in crate) mod lookahead_u8 {
+    pub fn deserialize<'de, D, T: 'de>(d: D) -> Result<Option<T>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+        T: serde::Deserialize<'de>,
+    {
+        use core::marker::PhantomData;
+        use serde::de::{Error, SeqAccess, Visitor};
+
+        struct OptVecVisitor<'de, T: serde::Deserialize<'de>>(PhantomData<&'de T>);
+
+        impl<'de, T: serde::Deserialize<'de>> Visitor<'de> for OptVecVisitor<'de, T> {
+            type Value = Option<T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("opt")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let lookahead: u8 = seq
+                    .next_element()?
+                    .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?;
+                if lookahead != 0 {
+                    seq.next_element()
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+
+        d.deserialize_seq(OptVecVisitor(PhantomData))
+    }
+    pub fn serialize<S, T>(val: &Option<T>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+        T: serde::Serialize,
+    {
+        use serde::ser::SerializeTuple;
+        if let Some(val) = val {
+            let mut s = s.serialize_tuple(2)?;
+            s.serialize_element(&1u8)?;
+            s.serialize_element(val)?;
+            s.end()
+        } else {
+            s.serialize_u8(0)
+        }
+    }
+}
+
 // for completeness sake
 pub(in crate) mod string_null {
     use serde::de::Deserialize;

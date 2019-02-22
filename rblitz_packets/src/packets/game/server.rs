@@ -925,13 +925,6 @@ pub struct SGlobalCombatMessage {
     pub object_name_net_id: u32,
 }
 
-#[packet_id(0x86)]
-#[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
-pub struct SWorldLockCameraServer {
-    pub locked: bool,
-    pub client_id: u32,
-}
-
 #[packet_id(0x88)]
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct SWaypointListHeroWithSpeed {
@@ -1231,11 +1224,13 @@ pub struct SWaypointList {
 }
 
 #[packet_id(0xC2)]
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct SOnEnterVisibilityClient {
     #[serde(with = "crate::vec_u8")]
     pub entries: Vec<ItemData>,
-    // todo
+    #[serde(with = "crate::lookahead_u8")]
+    pub look_at_pos: Option<Vector3>,
+    pub movement_data: MovementData,
 }
 
 #[packet_id(0xC3)]

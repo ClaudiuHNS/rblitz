@@ -158,6 +158,78 @@ pub struct ItemData {
     pub item_id: u32,
 }
 
+#[derive(Clone, Debug)]
+pub enum MovementData {
+    Normal(MovementDataNormal),
+    Stop(MovementDataStop),
+    Speed(MovementDataWithSpeed),
+    None(i32),
+}
+
+impl<'de> serde::Deserialize<'de> for MovementData {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, SeqAccess, Visitor};
+
+        struct MovVisitor;
+
+        impl<'de> Visitor<'de> for MovVisitor {
+            type Value = MovementData;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("movdata")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let lookahead: u8 = seq
+                    .next_element()?
+                    .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?;
+                Ok(match lookahead {
+                    1 => MovementData::Speed(
+                        seq.next_element()?
+                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
+                    ),
+                    2 => MovementData::Normal(
+                        seq.next_element()?
+                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
+                    ),
+                    3 => MovementData::Stop(
+                        seq.next_element()?
+                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
+                    ),
+                    _ => MovementData::None(
+                        seq.next_element()?
+                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
+                    ),
+                })
+            }
+        }
+
+        d.deserialize_seq(MovVisitor)
+    }
+}
+
+impl serde::Serialize for MovementData {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeTuple;
+        let mut s = s.serialize_tuple(2)?;
+        match self {
+            MovementData::Stop(data) => s.serialize_element(data)?,
+            MovementData::Normal(data) => s.serialize_element(data)?,
+            MovementData::Speed(data) => s.serialize_element(data)?,
+            MovementData::None(data) => s.serialize_element(data)?,
+        }
+        s.end()
+    }
+}
 // todo implement actual de/serialization
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct MovementDataNormal {

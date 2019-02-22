@@ -76,6 +76,13 @@ pub struct CTipEvent {
     pub tip_id: u32,
 }
 
+#[packet_id(0x86)]
+#[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
+pub struct CWorldLockCameraServer {
+    pub locked: bool,
+    pub client_id: u32,
+}
+
 #[packet_id(0x91)]
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
 pub struct CClientFinished;
