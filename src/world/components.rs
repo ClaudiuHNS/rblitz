@@ -57,12 +57,12 @@ impl NetId {
     }
 
     #[inline]
-    pub fn id(&self) -> u32 {
+    pub fn id(self) -> u32 {
         self.0
     }
 
     #[inline]
-    pub fn node_id(&self) -> NetNodeId {
+    pub fn node_id(self) -> NetNodeId {
         NetNodeId::from_trusted(((self.0 & 0xFF000000) >> 24) as u8)
     }
 }

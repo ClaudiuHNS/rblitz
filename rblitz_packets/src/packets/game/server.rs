@@ -925,13 +925,6 @@ pub struct SGlobalCombatMessage {
     pub object_name_net_id: u32,
 }
 
-#[packet_id(0x86)]
-#[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
-pub struct SWorldLockCameraServer {
-    pub locked: bool,
-    pub client_id: u32,
-}
-
 #[packet_id(0x88)]
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct SWaypointListHeroWithSpeed {

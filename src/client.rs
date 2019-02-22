@@ -23,7 +23,7 @@ pub struct ClientMap {
 
 impl ClientMap {
     pub fn init_from_config(world: &mut World, players: Vec<PlayerConfig>) {
-        let mut clients = players
+        let clients = players
             .into_iter()
             .take(12)
             .enumerate()
@@ -65,11 +65,11 @@ impl ClientMap {
                 Team::Order => {
                     roster_update.order_player_ids[order_id] = client.player_id;
                     order_id += 1;
-                }
+                },
                 Team::Chaos => {
                     roster_update.chaos_player_ids[chaos_id] = client.player_id;
                     chaos_id += 1;
-                }
+                },
             }
         }
 
@@ -164,6 +164,8 @@ pub enum ClientStatus {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct ClientId(pub u32);
 
+// Make sure that any access to the peer that might mutate is behind a &mut self access for the client,
+// otherwise we might end up with data races in enet itself. Also make sure to not access the LEnetServer together with mutable clients
 pub struct Client {
     pub peer: Option<NonNull<enet::ENetPeer>>,
     blowfish: UnsafeCell<Blowfish>,

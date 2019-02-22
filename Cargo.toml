@@ -7,10 +7,6 @@ license = "AGPL-3.0"
 description = "legoland private server"
 publish = false
 
-[dependencies.rblitz_packets]
-path = "./rblitz_packets"
-version = "0.1.0"
-
 [dependencies]
 fern = { version = "0.5", features = ["colored"] }
 log = "0.4.6"
@@ -27,6 +23,10 @@ chrono = "0.4.6"
 byteorder = "1.2.7"
 indexmap = "1.0.2"
 ron = "0.4.1"
+
+[dependencies.rblitz_packets]
+path = "./rblitz_packets"
+version = "0.1.0"
 
 [dependencies.serde]
 version = "1.0.84"

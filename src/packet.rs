@@ -1,7 +1,7 @@
 pub mod chat;
 pub mod game;
 pub mod loading_screen;
-pub mod packet_handler;
+pub mod packet_handler_system;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(packed)]

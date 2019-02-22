@@ -8,7 +8,7 @@ rust:
 matrix:
   include:
   - name: "rustfmt"
-    rust: stable
+    rust: nightly
     before_script:
     - rustup component add rustfmt
     script:

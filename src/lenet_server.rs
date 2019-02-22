@@ -55,7 +55,7 @@ impl LENetServer {
             enet::_ENetEventType_ENET_EVENT_TYPE_CONNECT => {
                 set_peer_data::<ClientId>(event.peer, None);
                 Ok(Event::NoEvent)
-            }
+            },
             enet::_ENetEventType_ENET_EVENT_TYPE_DISCONNECT => {
                 if let Some(cid) = peer_data(event.peer) {
                     set_peer_data::<ClientId>(event.peer, None);
@@ -63,7 +63,7 @@ impl LENetServer {
                 } else {
                     Ok(Event::NoEvent)
                 }
-            }
+            },
             enet::_ENetEventType_ENET_EVENT_TYPE_RECEIVE => {
                 let data = unsafe {
                     slice::from_raw_parts_mut((*event.packet).data, (*event.packet).dataLength)
@@ -81,7 +81,7 @@ impl LENetServer {
                     unsafe { enet::enet_packet_destroy(event.packet) };
                     Ok(Event::Connected(packet, event.peer))
                 }
-            }
+            },
             _ => Ok(Event::NoEvent),
         }
     }
