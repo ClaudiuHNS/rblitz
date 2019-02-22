@@ -171,7 +171,6 @@ impl<'de> serde::Deserialize<'de> for MovementData {
     where
         D: serde::Deserializer<'de>,
     {
-        use core::marker::PhantomData;
         use serde::de::{Error, SeqAccess, Visitor};
 
         struct MovVisitor;
@@ -220,7 +219,7 @@ impl serde::Serialize for MovementData {
     where
         S: serde::Serializer,
     {
-        use serde::{ser::Error, ser::SerializeTuple};
+        use serde::ser::SerializeTuple;
         let mut s = s.serialize_tuple(2)?;
         match self {
             MovementData::Stop(data) => s.serialize_element(data)?,

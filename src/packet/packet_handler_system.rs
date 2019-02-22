@@ -74,7 +74,10 @@ impl<'r> PacketHandlerSys<'r> {
     {
         assert!(
             self.game_handlers
-                .insert(P::ID, Box::new(PacketHandlerDummy::<P>(core::marker::PhantomData)))
+                .insert(
+                    P::ID,
+                    Box::new(PacketHandlerDummy::<P>(core::marker::PhantomData))
+                )
                 .is_none(),
             "Game handler replaced for 0x{id:X}, check that it isn't being registered twice and\
              that the ID(0x{id:X}) is correct",

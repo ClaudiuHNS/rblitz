@@ -13,7 +13,7 @@ log = "0.4.6"
 enet-sys = { path = "./enet-sys" }
 specs = "0.14.3"
 shrev = "1.0.1"
-shred = {version = "0.7.1", features = ["nightly"] }
+shred = "0.7.1"
 shred-derive = "0.5.1"
 block-cipher-trait = "0.6.2"
 block-modes = "0.2.0"

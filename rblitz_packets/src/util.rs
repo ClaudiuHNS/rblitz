@@ -37,8 +37,6 @@ pub(in crate) mod f8 {
 }
 
 pub(in crate) mod lookahead_u8 {
-    use serde::Deserialize;
-
     pub fn deserialize<'de, D, T: 'de>(d: D) -> Result<Option<T>, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -78,7 +76,7 @@ pub(in crate) mod lookahead_u8 {
         S: serde::Serializer,
         T: serde::Serialize,
     {
-        use serde::{ser::Error, ser::SerializeTuple};
+        use serde::ser::SerializeTuple;
         if let Some(val) = val {
             let mut s = s.serialize_tuple(2)?;
             s.serialize_element(&1u8)?;
