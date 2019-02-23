@@ -3,7 +3,6 @@ os:
 - linux
 rust:
 - stable
-- beta
 - nightly
 matrix:
   include:
@@ -13,8 +12,6 @@ matrix:
     - rustup component add rustfmt
     script:
     - cargo fmt --all -- --check
-  allow_failures:
-  - rust: nightly
   fast_finish: true
 cache: cargo
 branches:

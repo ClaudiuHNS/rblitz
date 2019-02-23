@@ -21,8 +21,8 @@ bitflags! {
 struct NavGrid {
     pub header: NavGridHeader,
     pub cells: Vec<NavGridCell>,
-    pub sampled_heights_dist_x: f32,
-    pub sampled_heights_dist_y: f32,
+    pub sampled_height_dist_x: f32,
+    pub sampled_height_dist_y: f32,
     pub sampled_heights: Vec<f32>,
     pub hint_grid: Vec<(Vec<f32>, i16, i16)>,
     pub dimensions: Vector3<f32>,
@@ -60,8 +60,8 @@ impl NavGrid {
         Ok(Self {
             header,
             cells,
-            sampled_heights_dist_x,
-            sampled_heights_dist_y,
+            sampled_height_dist_x,
+            sampled_height_dist_y,
             sampled_heights,
             hint_grid,
             dimensions,
