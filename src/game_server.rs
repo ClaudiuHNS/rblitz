@@ -6,7 +6,7 @@ use crate::{
     client::ClientMap,
     config::PlayerConfig,
     lenet_server::LENetServer,
-    packet::packet_handler_system::PacketHandlerSys,
+    packet::{packet_dispatcher_sys::PacketDispatcher, packet_handler_system::PacketHandlerSys},
     world::{
         components::{NetId, SummonerSpells, Team, UnitName},
         resources::GameTime,
@@ -39,11 +39,18 @@ impl<'a, 'b> GameServer<'a, 'b> {
         let server = LENetServer::new(to_enet_address(address, port));
         let mut world = World::new();
         world.add_resource(GameTime(0.0));
-        world.register::<NetId>();
-        world.register::<Team>();
-        world.register::<UnitName>();
-        world.register::<SummonerSpells>();
-        let mut dispatcher = DispatcherBuilder::new().build();
+        // temporary
+        {
+            world.register::<NetId>();
+            world.register::<Team>();
+            world.register::<UnitName>();
+            world.register::<SummonerSpells>();
+        }
+        let (packet_channel_send, packet_channel_receive) = crossbeam_channel::unbounded();
+        world.add_resource(packet_channel_send);
+        let mut dispatcher = DispatcherBuilder::new()
+            .with_thread_local(PacketDispatcher::new(packet_channel_receive))
+            .build();
         dispatcher.setup(&mut world.res);
         ClientMap::init_from_config(&mut world, players);
         Ok(GameServer {

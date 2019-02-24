@@ -11,7 +11,10 @@ use core::{cell::UnsafeCell, mem, ops, ptr::NonNull, slice};
 use crate::{
     config::PlayerConfig,
     error::{Error, Result},
-    packet::{game::GamePacket, loading_screen::LoadingScreenPacket, Channel, KeyCheck},
+    packet::{
+        game::GamePacket, loading_screen::LoadingScreenPacket, packet_dispatcher_sys::PacketSender,
+        Channel, KeyCheck,
+    },
     world::components::{NetId, SummonerSpells, Team, UnitName},
 };
 
@@ -53,7 +56,8 @@ impl ClientMap {
     }
 
     pub(super) fn send_roster_update(
-        &mut self,
+        &self,
+        sender: PacketSender<'_>,
         unit_names: &ReadStorage<UnitName>,
         teams: &ReadStorage<Team>,
         cid: ClientId,
@@ -96,17 +100,22 @@ impl ClientMap {
                 )
             })
             .collect::<Vec<_>>();
-        let client = self.get_mut(&cid).unwrap();
-        client.send_loading_screen_packet(&roster_update);
+        sender.single(
+            cid,
+            Channel::LoadingScreen,
+            LoadingScreenPacket::to_bytes(&roster_update),
+        );
         for (reskin, rename) in packets {
-            client.send_loading_screen_packet(&reskin);
-            client.send_loading_screen_packet(&rename);
-        }
-    }
-
-    pub fn broadcast<P: GamePacket>(&mut self, sender_net_id: u32, channel: Channel, packet: &P) {
-        for c in self.values_mut() {
-            c.send_game_packet(sender_net_id, channel, packet);
+            sender.single(
+                cid,
+                Channel::LoadingScreen,
+                LoadingScreenPacket::to_bytes(&reskin),
+            );
+            sender.single(
+                cid,
+                Channel::LoadingScreen,
+                LoadingScreenPacket::to_bytes(&rename),
+            );
         }
     }
 
@@ -224,10 +233,10 @@ impl Client {
 
         keycheck.client_id = cid.0;
         self.send_key_check(keycheck);
-        self.send_game_packet(
-            0,
+        self.send_data(
+            // FIXME use PacketSender
             Channel::Broadcast,
-            &SWorldSendGameNumber { game_id: 12314 },
+            &mut SWorldSendGameNumber { game_id: 12314 }.to_bytes(0),
         );
         Ok(())
     }
@@ -255,15 +264,24 @@ impl Client {
     }
 
     pub fn decrypt(&self, data: &mut [u8]) {
-        let nopad_len = data.len() - (data.len() % 8);
+        let nopad_len = data.len() - (data.len() & 0x07);
         self.blowfish()
             .decrypt_nopad(&mut data[..nopad_len])
             .unwrap();
     }
 
-    fn send_data(&mut self, channel: Channel, data: &mut [u8]) {
-        let nopadlen = data.len() - (data.len() % 8);
-        let _ = self.blowfish().encrypt_nopad(&mut data[..nopadlen]);
+    pub fn encrypt(&self, data: &mut [u8]) {
+        let nopadlen = data.len() - (data.len() & 0x07);
+        self.blowfish()
+            .encrypt_nopad(&mut data[..nopadlen])
+            .unwrap();
+    }
+
+    pub(super) fn send_data(&mut self, channel: Channel, data: &mut [u8]) {
+        if self.peer == None {
+            return;
+        }
+        self.encrypt(data);
         unsafe {
             enet::enet_peer_send(
                 self.peer.unwrap().as_ptr(),
@@ -273,35 +291,8 @@ impl Client {
                     data.len(),
                     enet::_ENetPacketFlag_ENET_PACKET_FLAG_RELIABLE,
                 ),
-            );
-        }
-    }
-
-    pub fn send_game_packet<P: GamePacket>(
-        &mut self,
-        sender_net_id: u32,
-        channel: Channel,
-        packet: &P,
-    ) {
-        if self.peer.is_some() {
-            log::trace!("[SENT][{}] {:?}", self.player_id, packet);
-            // FIXME cache the data vector in the client to save up on allocations?
-            let mut data = Vec::with_capacity(mem::size_of::<P>() + 1 + 4);
-            data.push(P::ID);
-            data.extend_from_slice(&sender_net_id.to_le_bytes());
-            rblitz_packets::to_writer(packet, &mut data).unwrap();
-            self.send_data(channel, data.as_mut_slice());
-        }
-    }
-
-    pub fn send_loading_screen_packet<P: LoadingScreenPacket>(&mut self, packet: &P) {
-        if self.peer.is_some() {
-            log::trace!("[SENT][{}] {:?}", self.player_id, packet);
-            let mut data = Vec::with_capacity(mem::size_of::<P>() + 1);
-            data.push(P::ID);
-            rblitz_packets::to_writer(packet, &mut data).unwrap();
-            self.send_data(Channel::LoadingScreen, data.as_mut_slice());
-        }
+            )
+        };
     }
 }
 

@@ -8,26 +8,33 @@ description = "legoland private server"
 publish = false
 
 [dependencies]
-fern = { version = "0.5", features = ["colored"] }
-log = "0.4.6"
+bitflags = "~1.0"
+byteorder = "~1.2"
+chrono = "~0.4"
+crossbeam-channel = "~0.3"
 enet-sys = { path = "./enet-sys" }
-specs = "0.14.3"
-shrev = "1.0.1"
-shred = "0.7.1"
-shred-derive = "0.5.1"
+indexmap = "~1.0"
+log = "~0.4"
+nalgebra = "~0.16"
+ron = "~0.4"
+shred = "~0.7"
+specs = "~0.14"
+toml = "~0.4"
+
+# FIXME replace these with our own or a non-mutating blowfish implementation
 block-cipher-trait = "0.6.2"
 block-modes = "0.2.0"
 blowfish = "0.4.0"
-toml = "0.4.10"
-chrono = "0.4.6"
-byteorder = "1.2.7"
-indexmap = "1.0.2"
-ron = "0.4.1"
+
+[dependencies.fern]
+version = "0.5"
+features = ["colored"]
 
 [dependencies.rblitz_packets]
 path = "./rblitz_packets"
 version = "0.1.0"
 
 [dependencies.serde]
-version = "1.0.84"
+version = "~1.0"
 features = ["derive"]
+

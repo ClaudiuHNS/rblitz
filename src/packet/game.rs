@@ -3,7 +3,7 @@
 
 use byteorder::{ReadBytesExt, LE};
 use serde::{Deserialize, Serialize};
-use shred::{Resources, SystemData, WriteExpect};
+use shred::{ReadExpect, Resources, SystemData, WriteExpect};
 use specs::ReadStorage;
 
 use rblitz_packets::{
@@ -14,7 +14,7 @@ use rblitz_packets::{
 use crate::{
     client::{ClientId, ClientMap, ClientStatus},
     error::Result,
-    packet::Channel,
+    packet::{packet_dispatcher_sys::PacketSender, Channel},
     world::components::{NetId, SummonerSpells, Team, UnitName},
 };
 
@@ -47,7 +47,16 @@ where
     }
 }
 
-pub trait GamePacket: PacketId + Serialize + std::fmt::Debug {}
+// clean up the super trait requirements
+pub trait GamePacket: PacketId + Serialize + Sized + std::fmt::Debug {
+    fn to_bytes(&self, sender_net_id: u32) -> Box<[u8]> {
+        let mut data = Vec::with_capacity(core::mem::size_of::<Self>() + 1 + 4);
+        data.push(Self::ID);
+        data.extend_from_slice(&sender_net_id.to_le_bytes());
+        rblitz_packets::to_writer(&self, &mut data).unwrap();
+        data.into_boxed_slice()
+    }
+}
 impl<T> GamePacket for T where T: PacketId + Serialize + std::fmt::Debug {}
 
 pub trait PacketHandlerImpl<'a>: GamePacket + for<'de> Deserialize<'de> {
@@ -74,23 +83,20 @@ impl<'a> RawGamePacket<'a> {
 }
 
 impl<'a> PacketHandlerImpl<'a> for CQueryStatusReq {
-    type Data = WriteExpect<'a, ClientMap>;
-    fn handle_self(self, mut clients: Self::Data, cid: ClientId, sender_net_id: u32) -> Result<()> {
-        clients.get_mut(&cid).unwrap().send_game_packet(
-            0,
-            Channel::Broadcast,
-            &SQueryStatusAns { is_ok: true },
-        );
+    type Data = PacketSender<'a>;
+    fn handle_self(self, sender: Self::Data, cid: ClientId, _: u32) -> Result<()> {
+        sender.single_packet(cid, Channel::Broadcast, 0, &SQueryStatusAns { is_ok: true });
         Ok(())
     }
 }
 
 impl<'a> PacketHandlerImpl<'a> for CReconnect {
-    type Data = WriteExpect<'a, ClientMap>;
-    fn handle_self(self, mut clients: Self::Data, cid: ClientId, sender_net_id: u32) -> Result<()> {
-        clients.get_mut(&cid).unwrap().send_game_packet(
-            0,
+    type Data = PacketSender<'a>;
+    fn handle_self(self, sender: Self::Data, cid: ClientId, _: u32) -> Result<()> {
+        sender.single_packet(
+            cid,
             Channel::ClientToServer,
+            0,
             &SReconnect { client_id: cid.0 },
         );
         Ok(())
@@ -108,13 +114,14 @@ impl<'a> PacketHandlerImpl<'a> for CSyncVersion {
     type Data = (
         ReadStorage<'a, SummonerSpells>,
         ReadStorage<'a, Team>,
-        WriteExpect<'a, ClientMap>,
+        ReadExpect<'a, ClientMap>,
+        PacketSender<'a>,
     );
     fn handle_self(
         self,
-        (summoner_spells, teams, mut clients): Self::Data,
+        (summoner_spells, teams, clients, sender): Self::Data,
         cid: ClientId,
-        sender_net_id: u32,
+        _: u32,
     ) -> Result<()> {
         let mut player_info: [PlayerLoadInfo; 12] = Default::default();
         for (load_info, client) in player_info.iter_mut().zip(clients.values()) {
@@ -133,9 +140,10 @@ impl<'a> PacketHandlerImpl<'a> for CSyncVersion {
             };
         }
 
-        clients.get_mut(&cid).unwrap().send_game_packet(
-            0,
+        sender.single_packet(
+            cid,
             Channel::Broadcast,
+            0,
             &SSyncVersion {
                 is_version_ok: true,
                 map: 8, //todo replace with world.read_resource::<Map>().id
@@ -149,29 +157,34 @@ impl<'a> PacketHandlerImpl<'a> for CSyncVersion {
 }
 
 impl<'a> PacketHandlerImpl<'a> for CClientReady {
-    type Data = (ReadStorage<'a, NetId>, WriteExpect<'a, ClientMap>);
+    type Data = (
+        ReadStorage<'a, NetId>,
+        WriteExpect<'a, ClientMap>,
+        PacketSender<'a>,
+    );
     fn handle_self(
         self,
-        (net_ids, mut clients): Self::Data,
+        (net_ids, mut clients, sender): Self::Data,
         cid: ClientId,
-        sender_net_id: u32,
+        _: u32,
     ) -> Result<()> {
         clients.get_mut(&cid).unwrap().status = ClientStatus::Ready;
         if clients.values().all(|c| c.status == ClientStatus::Ready) {
             log::info!("All clients ready, starting game");
-            clients.broadcast(
-                0,
+            sender.broadcast_all(
                 Channel::Broadcast,
+                0,
                 &SStartGame {
                     tournament_pause_enabled: false,
                 },
             );
-            for c in clients.values_mut() {
+            for (cid, c) in clients.iter_mut() {
                 c.status = ClientStatus::Connected;
                 let net_id = net_ids.get(c.champion).unwrap();
-                c.send_game_packet(
-                    net_id.id(),
+                sender.single_packet(
+                    *cid,
                     Channel::Broadcast,
+                    net_id.id(),
                     &SOnEnterVisibilityClient {
                         entries: Vec::new(),
                         look_at_pos: None,
@@ -180,7 +193,7 @@ impl<'a> PacketHandlerImpl<'a> for CClientReady {
                             forward: Vector2 { x: 26.0, y: 280.0 },
                         }),
                     },
-                )
+                );
             }
         }
         Ok(())
@@ -194,13 +207,14 @@ impl<'a> PacketHandlerImpl<'a> for CCharSelected {
         ReadStorage<'a, Team>,
         ReadStorage<'a, NetId>,
         ReadStorage<'a, UnitName>,
-        WriteExpect<'a, ClientMap>,
+        ReadExpect<'a, ClientMap>,
+        PacketSender<'a>,
     );
     fn handle_self(
         self,
-        (summoner_spells, teams, net_ids, unit_names, mut clients): Self::Data,
+        (summoner_spells, teams, net_ids, unit_names, clients, sender): Self::Data,
         cid: ClientId,
-        sender_net_id: u32,
+        _: u32,
     ) -> Result<()> {
         let mut hero_data: [(SCreateHero, SAvatarInfo); 12] = Default::default();
         for ((cid, client), hero_data) in clients.iter().zip(hero_data.iter_mut()) {
@@ -230,22 +244,21 @@ impl<'a> PacketHandlerImpl<'a> for CCharSelected {
             );
         }
 
-        let len = clients.len();
-        let client = clients.get_mut(&cid).unwrap();
-
-        client.send_game_packet(
-            0,
+        sender.single_packet(
+            cid,
             Channel::Broadcast,
+            0,
             &SStartSpawn {
                 bot_count_order: 0,
                 bot_count_chaos: 0,
             },
         );
-        for (create, avatar) in hero_data.iter().take(len) {
-            client.send_game_packet(0, Channel::Broadcast, create);
-            client.send_game_packet(create.unit_net_id, Channel::Broadcast, avatar);
+        // FIXME make a function for this loop kinda thing in PacketSender?
+        for (create, avatar) in hero_data.iter().take(clients.len()) {
+            sender.single_packet(cid, Channel::Broadcast, 0, create);
+            sender.single_packet(cid, Channel::Broadcast, 0, avatar);
         }
-        client.send_game_packet(0, Channel::Broadcast, &SEndSpawn);
+        sender.single_packet(cid, Channel::Broadcast, 0, &SEndSpawn);
         Ok(())
     }
 }
@@ -253,13 +266,13 @@ impl<'a> PacketHandlerImpl<'a> for CCharSelected {
 // Turns out riot is just horrible and uses some weird interpolation for the loading percentage
 // client side which results in completely inaccurate loading progression
 impl<'a> PacketHandlerImpl<'a> for CPingLoadInfo {
-    type Data = WriteExpect<'a, ClientMap>;
-    fn handle_self(mut self, mut clients: Self::Data, cid: ClientId, _: u32) -> Result<()> {
+    type Data = (ReadExpect<'a, ClientMap>, PacketSender<'a>);
+    fn handle_self(mut self, (clients, sender): Self::Data, cid: ClientId, _: u32) -> Result<()> {
         let client = clients.get(&cid).unwrap();
         self.connection_info.player_id = client.player_id;
-        clients.broadcast(
-            0,
+        sender.broadcast_all(
             Channel::Broadcast,
+            0,
             &SPingLoadInfo {
                 connection_info: self.connection_info,
             },
@@ -270,7 +283,7 @@ impl<'a> PacketHandlerImpl<'a> for CPingLoadInfo {
 
 impl<'a> PacketHandlerImpl<'a> for CExit {
     type Data = WriteExpect<'a, ClientMap>;
-    fn handle_self(self, mut clients: Self::Data, cid: ClientId, sender_net_id: u32) -> Result<()> {
+    fn handle_self(self, mut clients: Self::Data, cid: ClientId, _: u32) -> Result<()> {
         clients.get_mut(&cid).unwrap().disconnect();
         Ok(())
     }

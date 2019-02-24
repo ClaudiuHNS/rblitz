@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use shred::SystemData;
 use specs::World;
 
 use crate::{
@@ -6,6 +7,7 @@ use crate::{
     lenet_server::{Event, LENetServer},
     packet::{
         game::{PacketHandler, PacketHandlerDummy, PacketHandlerImpl, RawGamePacket},
+        packet_dispatcher_sys::PacketSender,
         Channel,
     },
     world::components::{Team, UnitName},
@@ -59,6 +61,7 @@ impl<'r> PacketHandlerSys<'r> {
                 use rblitz_packets::packets::{loading_screen::RequestJoinTeam, PacketId};
                 if !data.is_empty() && RequestJoinTeam::ID == data[0] {
                     world.write_resource::<ClientMap>().send_roster_update(
+                        PacketSender::fetch(&world.res),
                         &world.read_storage::<UnitName>(),
                         &world.read_storage::<Team>(),
                         cid,
