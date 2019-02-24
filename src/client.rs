@@ -1,19 +1,16 @@
 use block_modes::BlockMode;
 use enet_sys as enet;
-use rblitz_packets::packets::{
-    game::server::SWorldSendGameNumber,
-    loading_screen::{RequestRename, RequestReskin, TeamRosterUpdate},
-};
+use indexmap::IndexMap;
+use rblitz_packets::packets::loading_screen::{RequestRename, RequestReskin, TeamRosterUpdate};
 use specs::{world::Builder, Entity, ReadStorage, World};
 
-use core::{cell::UnsafeCell, mem, ops, ptr::NonNull, slice};
+use core::{ops, ptr::NonNull};
 
 use crate::{
     config::PlayerConfig,
     error::{Error, Result},
     packet::{
-        dispatcher_sys::PacketSender, game::GamePacket, loading_screen::LoadingScreenPacket,
-        Channel, KeyCheck,
+        dispatcher_sys::PacketSender, loading_screen::LoadingScreenPacket, Channel, KeyCheck,
     },
     world::components::{NetId, SummonerSpells, Team, UnitName},
     PLAYER_COUNT_MAX,
@@ -21,41 +18,134 @@ use crate::{
 
 type Blowfish = block_modes::Ecb<blowfish::Blowfish, block_modes::block_padding::ZeroPadding>;
 
-pub struct ClientMap {
-    clients: indexmap::IndexMap<ClientId, Client>,
+pub fn init_clients_from_config(world: &mut World, players: Vec<PlayerConfig>) {
+    let mut client_map = IndexMap::with_capacity(PLAYER_COUNT_MAX);
+    let mut conn_map = IndexMap::with_capacity(PLAYER_COUNT_MAX);
+    for (idx, player) in players.into_iter().enumerate().take(PLAYER_COUNT_MAX) {
+        let cid = ClientId(idx as u32);
+        conn_map.insert(
+            cid,
+            (
+                None,
+                Blowfish::new_varkey(&player.key.as_bytes()[..16]).unwrap(),
+            ),
+        );
+        let ent = world
+            .create_entity()
+            .with(NetId::new_spawned(idx as u32 + 1))
+            .with(player.team)
+            .with(UnitName(player.champion))
+            .with(SummonerSpells(
+                player.summoner_spell0,
+                player.summoner_spell1,
+            ))
+            .build();
+        client_map.insert(
+            cid,
+            Client::new(
+                ent,
+                player.name,
+                player.profile_icon,
+                player.summoner_level,
+                player.player_id,
+                player.skin_id,
+            ),
+        );
+    }
+    world.add_resource(ClientMap(client_map));
+    world.add_resource(ClientConnectionMap(conn_map));
 }
 
-impl ClientMap {
-    pub fn init_from_config(world: &mut World, players: Vec<PlayerConfig>) {
-        let clients = players
-            .into_iter()
-            .take(PLAYER_COUNT_MAX)
-            .enumerate()
-            .map(|(cid, p)| {
-                let ent = world
-                    .create_entity()
-                    .with(NetId::new_spawned(cid as u32 + 1))
-                    .with(p.team)
-                    .with(UnitName(p.champion))
-                    .with(SummonerSpells(p.summoner_spell0, p.summoner_spell1))
-                    .build();
-                (
-                    ClientId(cid as u32),
-                    Client::new(
-                        &p.key.as_bytes()[..16],
-                        ent,
-                        p.name,
-                        p.profile_icon,
-                        p.summoner_level,
-                        p.player_id,
-                        p.skin_id,
+pub struct ClientConnectionMap(IndexMap<ClientId, (Option<NonNull<enet::ENetPeer>>, Blowfish)>);
+
+unsafe impl Send for ClientConnectionMap {}
+unsafe impl Sync for ClientConnectionMap {}
+
+impl ClientConnectionMap {
+    pub fn send_data(&mut self, cid: ClientId, channel: Channel, data: &mut [u8]) {
+        if let Some((Some(peer), bf)) = self.0.get_mut(&cid) {
+            Self::encrypt(bf, data);
+            unsafe {
+                enet::enet_peer_send(
+                    peer.as_ptr(),
+                    channel as u8,
+                    enet::enet_packet_create(
+                        data.as_ptr(),
+                        data.len(),
+                        enet::_ENetPacketFlag_ENET_PACKET_FLAG_RELIABLE,
                     ),
                 )
-            })
-            .collect::<indexmap::IndexMap<_, _>>();
-        world.add_resource(ClientMap { clients });
+            };
+        }
     }
 
+    pub fn auth(
+        &mut self,
+        cid: ClientId,
+        player_id: u64,
+        keycheck: KeyCheck,
+        new_peer: *mut enet::ENetPeer,
+    ) -> Result<()> {
+        let mut check = keycheck.check_id;
+        let (peer, bf) = &mut self.0[&cid];
+        if let Some(prev_peer) = peer.take() {
+            unsafe { enet::enet_peer_disconnect(prev_peer.as_ptr(), 0) };
+        }
+        let _ = bf.decrypt_nopad(&mut check);
+        if check != keycheck.player_id.to_le_bytes() || player_id != keycheck.player_id {
+            return Err(Error::AuthError);
+        }
+        log::info!("client {:?} authenticated [{:?}]", cid.0, keycheck);
+        crate::lenet_server::set_peer_data(new_peer, Some(cid));
+        *peer = NonNull::new(new_peer);
+        Ok(())
+    }
+
+    pub fn disconnect(&mut self, cid: ClientId) {
+        if let Some((Some(peer), _)) = self.0.get(&cid) {
+            unsafe { enet::enet_peer_disconnect(peer.as_ptr(), 0) }
+        }
+    }
+
+    #[inline]
+    pub fn decrypt(bf: &mut Blowfish, data: &mut [u8]) {
+        let nopad_len = data.len() - (data.len() & 0x07);
+        bf.decrypt_nopad(&mut data[..nopad_len]).unwrap();
+    }
+
+    #[inline]
+    pub fn encrypt(bf: &mut Blowfish, data: &mut [u8]) {
+        let nopad_len = data.len() - (data.len() & 0x07);
+        bf.encrypt_nopad(&mut data[..nopad_len]).unwrap();
+    }
+
+    #[inline]
+    pub fn decrypt_client(&mut self, cid: ClientId, data: &mut [u8]) {
+        Self::decrypt(&mut self.0[&cid].1, data);
+    }
+
+    #[inline]
+    pub fn encrypt_client(&mut self, cid: ClientId, data: &mut [u8]) {
+        Self::encrypt(&mut self.0[&cid].1, data);
+    }
+}
+
+impl ops::Deref for ClientConnectionMap {
+    type Target = IndexMap<ClientId, (Option<NonNull<enet::ENetPeer>>, Blowfish)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl ops::DerefMut for ClientConnectionMap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+pub struct ClientMap(IndexMap<ClientId, Client>);
+
+impl ClientMap {
     pub(super) fn send_roster_update(
         &self,
         sender: PacketSender<'_>,
@@ -119,47 +209,19 @@ impl ClientMap {
             );
         }
     }
-
-    pub fn broadcast_keycheck(&mut self, cid: ClientId) {
-        let packets = self
-            .iter()
-            .filter(|(cid2, _)| **cid2 != cid)
-            .map(|(cid, c)| {
-                let mut check_id = c.player_id.to_le_bytes();
-                c.blowfish().encrypt_nopad(&mut check_id).unwrap();
-                KeyCheck {
-                    action: 0,
-                    pad: [0, 0, 0],
-                    client_id: cid.0,
-                    player_id: c.player_id,
-                    check_id,
-                }
-            })
-            .collect::<Vec<_>>();
-        let client = self.get_mut(&cid).unwrap();
-        for packet in packets {
-            client.send_key_check(packet);
-        }
-    }
-}
-
-impl From<indexmap::IndexMap<ClientId, Client>> for ClientMap {
-    fn from(map: indexmap::IndexMap<ClientId, Client>) -> Self {
-        ClientMap { clients: map }
-    }
 }
 
 impl ops::Deref for ClientMap {
-    type Target = indexmap::IndexMap<ClientId, Client>;
+    type Target = IndexMap<ClientId, Client>;
 
     fn deref(&self) -> &Self::Target {
-        &self.clients
+        &self.0
     }
 }
 
 impl ops::DerefMut for ClientMap {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.clients
+        &mut self.0
     }
 }
 
@@ -177,8 +239,6 @@ pub struct ClientId(pub u32);
 // Make sure that any access to the peer that might mutate is behind a &mut self access for the client,
 // otherwise we might end up with data races in enet itself. Also make sure to not access the LEnetServer together with mutable clients
 pub struct Client {
-    pub peer: Option<NonNull<enet::ENetPeer>>,
-    blowfish: UnsafeCell<Blowfish>,
     pub name: String,
     pub player_id: u64,
     pub summoner_level: u16,
@@ -190,7 +250,6 @@ pub struct Client {
 
 impl Client {
     pub fn new(
-        key: &[u8],
         champion: Entity,
         name: String,
         profile_icon: i32,
@@ -199,8 +258,6 @@ impl Client {
         skin_id: u32,
     ) -> Self {
         Client {
-            peer: None,
-            blowfish: UnsafeCell::new(Blowfish::new_varkey(key).unwrap()),
             name,
             player_id,
             summoner_level,
@@ -210,92 +267,4 @@ impl Client {
             champion,
         }
     }
-
-    pub fn disconnect(&mut self) {
-        if let Some(peer) = self.peer.take() {
-            unsafe { enet_sys::enet_peer_disconnect(peer.as_ptr(), 0) }
-        }
-    }
-
-    pub fn auth(
-        &mut self,
-        cid: ClientId,
-        mut keycheck: KeyCheck,
-        peer: *mut enet::ENetPeer,
-    ) -> Result<()> {
-        let mut check = keycheck.check_id;
-        let _ = self.blowfish().decrypt_nopad(&mut check);
-        if check != keycheck.player_id.to_le_bytes() || self.player_id != keycheck.player_id {
-            return Err(Error::AuthError);
-        }
-        log::info!("client {:?} authenticated [{:?}]", cid.0, keycheck);
-        crate::lenet_server::set_peer_data(peer, Some(cid));
-        self.peer = NonNull::new(peer);
-
-        keycheck.client_id = cid.0;
-        self.send_key_check(keycheck);
-        self.send_data(
-            // FIXME use PacketSender
-            Channel::Broadcast,
-            &mut SWorldSendGameNumber { game_id: 12314 }.to_bytes(0),
-        );
-        Ok(())
-    }
-
-    pub fn send_key_check(&mut self, mut keycheck: KeyCheck) {
-        log::info!(
-            "sending keycheck to player {} {:?}",
-            self.player_id,
-            keycheck
-        );
-        unsafe {
-            let data = slice::from_raw_parts_mut(
-                &mut keycheck as *mut _ as *mut u8,
-                mem::size_of::<KeyCheck>(),
-            );
-            self.send_data(Channel::Handshake, data);
-        }
-    }
-
-    // FIXME shitty hack cause of how this blowfish works
-    #[inline]
-    #[allow(clippy::mut_from_ref)]
-    fn blowfish(&self) -> &mut Blowfish {
-        unsafe { &mut *self.blowfish.get() }
-    }
-
-    pub fn decrypt(&self, data: &mut [u8]) {
-        let nopad_len = data.len() - (data.len() & 0x07);
-        self.blowfish()
-            .decrypt_nopad(&mut data[..nopad_len])
-            .unwrap();
-    }
-
-    pub fn encrypt(&self, data: &mut [u8]) {
-        let nopadlen = data.len() - (data.len() & 0x07);
-        self.blowfish()
-            .encrypt_nopad(&mut data[..nopadlen])
-            .unwrap();
-    }
-
-    pub(super) fn send_data(&mut self, channel: Channel, data: &mut [u8]) {
-        if self.peer == None {
-            return;
-        }
-        self.encrypt(data);
-        unsafe {
-            enet::enet_peer_send(
-                self.peer.unwrap().as_ptr(),
-                channel as u8,
-                enet::enet_packet_create(
-                    data.as_ptr(),
-                    data.len(),
-                    enet::_ENetPacketFlag_ENET_PACKET_FLAG_RELIABLE,
-                ),
-            )
-        };
-    }
 }
-
-unsafe impl Send for Client {}
-unsafe impl Sync for Client {}

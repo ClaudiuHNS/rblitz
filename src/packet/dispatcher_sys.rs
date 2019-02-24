@@ -1,5 +1,5 @@
 use crate::{
-    client::{ClientId, ClientMap},
+    client::{ClientConnectionMap, ClientId},
     packet::{game::GamePacket, Channel},
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -94,26 +94,23 @@ impl PacketDispatcher {
 }
 
 impl<'a> System<'a> for PacketDispatcher {
-    type SystemData = WriteExpect<'a, ClientMap>;
+    type SystemData = WriteExpect<'a, ClientConnectionMap>;
 
-    fn run(&mut self, mut client_map: Self::SystemData) {
+    fn run(&mut self, mut connection_map: Self::SystemData) {
         for cmd in self.0.try_iter() {
             match cmd {
                 Command::Single(cid, channel, mut packet) => {
-                    if let Some(client) = client_map.get_mut(&cid) {
-                        client.send_data(channel, &mut packet);
-                    }
+                    connection_map.send_data(cid, channel, &mut packet);
                 },
                 Command::BroadcastGroup(cids, channel, packet) => {
                     for cid in cids.iter() {
-                        if let Some(client) = client_map.get_mut(cid) {
-                            client.send_data(channel, &mut packet.clone());
-                        }
+                        connection_map.send_data(*cid, channel, &mut packet.clone());
                     }
                 },
                 Command::BroadcastAll(channel, packet) => {
-                    for client in client_map.values_mut() {
-                        client.send_data(channel, &mut packet.clone());
+                    let cids = connection_map.keys().cloned().collect::<Vec<_>>();
+                    for cid in cids {
+                        connection_map.send_data(cid, channel, &mut packet.clone());
                     }
                 },
             }

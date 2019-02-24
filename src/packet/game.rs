@@ -12,7 +12,7 @@ use rblitz_packets::{
 };
 
 use crate::{
-    client::{ClientId, ClientMap, ClientStatus},
+    client::{ClientConnectionMap, ClientId, ClientMap, ClientStatus},
     error::Result,
     packet::{dispatcher_sys::PacketSender, Channel},
     world::components::{NetId, SummonerSpells, Team, UnitName},
@@ -288,9 +288,9 @@ impl<'a> PacketHandlerImpl<'a> for CPingLoadInfo {
 }
 
 impl<'a> PacketHandlerImpl<'a> for CExit {
-    type Data = WriteExpect<'a, ClientMap>;
-    fn handle_self(self, mut clients: Self::Data, cid: ClientId, _: u32) -> Result<()> {
-        clients.get_mut(&cid).unwrap().disconnect();
+    type Data = WriteExpect<'a, ClientConnectionMap>;
+    fn handle_self(self, mut connections: Self::Data, cid: ClientId, _: u32) -> Result<()> {
+        connections.disconnect(cid);
         Ok(())
     }
 }

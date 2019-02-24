@@ -1,14 +1,15 @@
+use enet_sys::ENetPeer;
 use indexmap::IndexMap;
 use shred::SystemData;
 use specs::World;
 
 use crate::{
-    client::{ClientId, ClientMap, ClientStatus},
+    client::{ClientConnectionMap, ClientId, ClientMap, ClientStatus},
     lenet_server::{Event, LENetServer},
     packet::{
         dispatcher_sys::PacketSender,
         game::{PacketHandler, PacketHandlerDummy, PacketHandlerImpl, RawGamePacket},
-        Channel,
+        Channel, KeyCheck,
     },
     world::components::{Team, UnitName},
 };
@@ -33,10 +34,8 @@ impl<'r> PacketHandlerSys<'r> {
     fn handle_packet(&self, world: &World, channel: u8, cid: ClientId, data: &mut [u8]) {
         let channel = Channel::try_from(channel).expect("unknown channel received");
         world
-            .read_resource::<ClientMap>()
-            .get(&cid)
-            .unwrap()
-            .decrypt(data);
+            .write_resource::<ClientConnectionMap>()
+            .decrypt_client(cid, data);
         match channel {
             //handled outside of this
             Channel::Handshake => (),
@@ -89,34 +88,60 @@ impl<'r> PacketHandlerSys<'r> {
         );
     }
 
+    fn on_connect(&self, world: &World, keycheck: KeyCheck, peer: *mut ENetPeer) {
+        let mut clients = world.write_resource::<ClientMap>();
+        let mut connections = world.write_resource::<ClientConnectionMap>();
+        if let Some((cid, client)) = clients
+            .iter_mut()
+            .find(|(_, c)| c.player_id == keycheck.player_id)
+        {
+            let cid = *cid;
+            match connections.auth(cid, client.player_id, keycheck, peer) {
+                Ok(()) => {
+                    client.status = ClientStatus::Loading;
+                    let sender = PacketSender::fetch(&world.res);
+                    for (cid_iter, client) in clients.iter() {
+                        let mut check_id = client.player_id.to_le_bytes();
+                        connections.encrypt_client(*cid_iter, &mut check_id);
+                        sender.single(cid, Channel::Handshake, unsafe {
+                            core::slice::from_raw_parts(
+                                &KeyCheck {
+                                    action: 0,
+                                    pad: [0, 0, 0],
+                                    client_id: cid_iter.0,
+                                    player_id: client.player_id,
+                                    check_id,
+                                } as *const _ as *const u8,
+                                core::mem::size_of::<KeyCheck>(),
+                            )
+                            .to_owned()
+                            .into_boxed_slice()
+                        });
+                    }
+                },
+                Err(e) => {
+                    log::warn!("{:?}", e);
+                    unsafe { enet_sys::enet_peer_disconnect_now(peer, 0) }
+                },
+            }
+        }
+    }
+
     pub fn run(&self, server: &mut LENetServer, world: &World) {
         loop {
             match server.service(0) {
                 Ok(event) => match event {
                     Event::Connected(keycheck, peer) => {
-                        let mut clients = world.write_resource::<ClientMap>();
-                        let cid = clients
-                            .iter_mut()
-                            .find(|(_, c)| c.player_id == keycheck.player_id)
-                            .and_then(|(cid, client)| {
-                                if client.auth(*cid, keycheck, peer).is_ok() {
-                                    client.status = ClientStatus::Loading;
-                                    Some(*cid)
-                                } else {
-                                    None
-                                }
-                            });
-                        match cid {
-                            Some(cid) => clients.broadcast_keycheck(cid),
-                            None => unsafe { enet_sys::enet_peer_disconnect_now(peer, 0) },
-                        }
+                        self.on_connect(world, keycheck, peer);
                     },
                     Event::Disconnected(cid) => {
                         log::info!("Disconnected: {:?}", cid);
                         let mut clients = world.write_resource::<ClientMap>();
                         let client = clients.get_mut(&cid).unwrap();
                         client.status = ClientStatus::Disconnected;
-                        client.peer = None;
+                        world
+                            .write_resource::<ClientConnectionMap>()
+                            .disconnect(cid);
                         if clients
                             .values()
                             .all(|c| c.status == ClientStatus::Disconnected)

@@ -3,13 +3,13 @@ use specs::{Dispatcher, DispatcherBuilder, World};
 use std::{net::Ipv4Addr, time::Instant};
 
 use crate::{
-    client::ClientMap,
+    client::init_clients_from_config,
     config::PlayerConfig,
     lenet_server::LENetServer,
     packet::{dispatcher_sys::PacketDispatcher, handler_sys::PacketHandlerSys},
     world::{
         components::{NetId, SummonerSpells, Team, UnitName},
-        resources::GameTime,
+        resources::Time,
     },
 };
 
@@ -38,7 +38,7 @@ impl<'a, 'b> GameServer<'a, 'b> {
     pub fn new(address: Ipv4Addr, port: u16, players: Vec<PlayerConfig>) -> Result<Self, ()> {
         let server = LENetServer::new(to_enet_address(address, port));
         let mut world = World::new();
-        world.add_resource(GameTime(0.0));
+        world.add_resource(Time::new());
         // temporary
         {
             world.register::<NetId>();
@@ -52,7 +52,7 @@ impl<'a, 'b> GameServer<'a, 'b> {
             .with_thread_local(PacketDispatcher::new(packet_channel_receive))
             .build();
         dispatcher.setup(&mut world.res);
-        ClientMap::init_from_config(&mut world, players);
+        init_clients_from_config(&mut world, players);
         Ok(GameServer {
             world,
             packet_handler: PacketHandlerSys::new(),
@@ -65,12 +65,11 @@ impl<'a, 'b> GameServer<'a, 'b> {
         let mut last_instant = Instant::now();
         let mut delta_sum = 0.0;
         loop {
-            let elapsed = last_instant.elapsed();
+            delta_sum += self
+                .world
+                .write_resource::<Time>()
+                .set_delta(last_instant.elapsed());
             last_instant = Instant::now();
-            let delta =
-                (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64) / 1_000_000_000.0;
-            delta_sum += delta;
-            self.world.write_resource::<GameTime>().0 += delta;
 
             self.packet_handler.run(&mut self.server, &self.world);
 
