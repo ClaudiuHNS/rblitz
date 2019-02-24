@@ -12,10 +12,11 @@ use crate::{
     config::PlayerConfig,
     error::{Error, Result},
     packet::{
-        game::GamePacket, loading_screen::LoadingScreenPacket, packet_dispatcher_sys::PacketSender,
+        dispatcher_sys::PacketSender, game::GamePacket, loading_screen::LoadingScreenPacket,
         Channel, KeyCheck,
     },
     world::components::{NetId, SummonerSpells, Team, UnitName},
+    PLAYER_COUNT_MAX,
 };
 
 type Blowfish = block_modes::Ecb<blowfish::Blowfish, block_modes::block_padding::ZeroPadding>;
@@ -28,7 +29,7 @@ impl ClientMap {
     pub fn init_from_config(world: &mut World, players: Vec<PlayerConfig>) {
         let clients = players
             .into_iter()
-            .take(12)
+            .take(PLAYER_COUNT_MAX)
             .enumerate()
             .map(|(cid, p)| {
                 let ent = world

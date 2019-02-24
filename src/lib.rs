@@ -11,3 +11,6 @@ mod nav_grid;
 mod packet;
 mod systems;
 mod world;
+
+// The client is unable to handle more than this
+const PLAYER_COUNT_MAX: usize = 12;

@@ -5,15 +5,20 @@ use crate::{
 use crossbeam_channel::{Receiver, Sender};
 use shred::{System, SystemData, WriteExpect};
 
+/// A PacketSender just wraps a [`shred::Fetch`] of a ['crossbeam_channel::Sender'], it is used as
+/// a SystemData for sending out packets at the end of a game cycle and is the only way to send out
+/// packets to clients.
 pub struct PacketSender<'a>(shred::Fetch<'a, Sender<Command>>);
 
 impl<'a> PacketSender<'a> {
+    /// Sends data to a specified [`ClientId`]. Shouldnt be needed outside from the client module
     pub fn single(&self, cid: ClientId, channel: Channel, data: Box<[u8]>) {
         if let Err(e) = self.0.send(Command::Single(cid, channel, data)) {
             log::warn!("{}", e);
         }
     }
 
+    /// Sends a single packet to a specified [`ClientId`]
     pub fn single_packet<P>(&self, cid: ClientId, channel: Channel, sender_net_id: u32, packet: &P)
     where
         P: GamePacket,
@@ -22,6 +27,7 @@ impl<'a> PacketSender<'a> {
         self.single(cid, channel, packet.to_bytes(sender_net_id));
     }
 
+    /// Sends a single packet to all clients
     pub fn broadcast_all<P>(&self, channel: Channel, sender_net_id: u32, packet: &P)
     where
         P: GamePacket,
@@ -35,6 +41,7 @@ impl<'a> PacketSender<'a> {
         }
     }
 
+    /// Sends a single packet to a range of clients
     pub fn broadcast_group<P>(
         &self,
         cids: Box<[ClientId]>,
@@ -57,11 +64,9 @@ impl<'a> PacketSender<'a> {
 
 impl<'a> SystemData<'a> for PacketSender<'a> {
     fn setup(_: &mut shred::Resources) {}
-
     fn fetch(res: &'a shred::Resources) -> Self {
         PacketSender(res.fetch::<Sender<Command>>())
     }
-
     fn reads() -> Vec<shred::ResourceId> {
         vec![shred::ResourceId::new::<Sender<Command>>()]
     }
@@ -70,12 +75,16 @@ impl<'a> SystemData<'a> for PacketSender<'a> {
     }
 }
 
+/// A "Command" for the PacketDispatcher, telling it what to do with the data it receives on the
+/// crossbeam channel
 pub enum Command {
     Single(ClientId, Channel, Box<[u8]>),
     BroadcastGroup(Box<[ClientId]>, Channel, Box<[u8]>),
     BroadcastAll(Channel, Box<[u8]>),
 }
 
+/// The PacketDispatcher is responsible for sending out the packets to the respective clients at
+/// the end of a cycle
 pub struct PacketDispatcher(Receiver<Command>);
 
 impl PacketDispatcher {

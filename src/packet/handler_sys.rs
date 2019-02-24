@@ -6,16 +6,17 @@ use crate::{
     client::{ClientId, ClientMap, ClientStatus},
     lenet_server::{Event, LENetServer},
     packet::{
+        dispatcher_sys::PacketSender,
         game::{PacketHandler, PacketHandlerDummy, PacketHandlerImpl, RawGamePacket},
-        packet_dispatcher_sys::PacketSender,
         Channel,
     },
     world::components::{Team, UnitName},
 };
 
-/// We consider this a system obviously, but we won't register it in the system due to how
-/// individual packet handlers are managed. This system should also run before all the others ones
-/// while the packet sending system should be last.
+/// The PacketHandlerSys works similar to a [`shred::System`] with the exception that it is being
+/// used manually and not with the shred trait. The reason for that is that it should run before any
+/// other system and that it uses uses [`PacketHandler`] as "subsystems" of its own which would not
+/// be possible otherwise.
 pub struct PacketHandlerSys<'r> {
     game_handlers: IndexMap<u8, Box<dyn for<'a> PacketHandler<'a> + 'r>>,
 }
@@ -29,7 +30,7 @@ impl<'r> PacketHandlerSys<'r> {
         this
     }
 
-    pub fn handle_packet(&self, world: &World, channel: u8, cid: ClientId, data: &mut [u8]) {
+    fn handle_packet(&self, world: &World, channel: u8, cid: ClientId, data: &mut [u8]) {
         let channel = Channel::try_from(channel).expect("unknown channel received");
         world
             .read_resource::<ClientMap>()

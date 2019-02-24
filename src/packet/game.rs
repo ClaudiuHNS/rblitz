@@ -14,11 +14,13 @@ use rblitz_packets::{
 use crate::{
     client::{ClientId, ClientMap, ClientStatus},
     error::Result,
-    packet::{packet_dispatcher_sys::PacketSender, Channel},
+    packet::{dispatcher_sys::PacketSender, Channel},
     world::components::{NetId, SummonerSpells, Team, UnitName},
+    PLAYER_COUNT_MAX,
 };
 
-pub trait PacketHandler<'a> {
+/// The trait used for registering packet handlers as trait objects
+pub(super) trait PacketHandler<'a> {
     fn handle(
         &self,
         res: &'a Resources,
@@ -28,6 +30,7 @@ pub trait PacketHandler<'a> {
     ) -> Result<()>;
 }
 
+/// A generic dummy struct for trait object usage in the [`PacketHandlerSystem`]
 pub struct PacketHandlerDummy<P: GamePacket>(pub core::marker::PhantomData<P>);
 
 impl<'a, T> PacketHandler<'a> for PacketHandlerDummy<T>
@@ -47,7 +50,6 @@ where
     }
 }
 
-// clean up the super trait requirements
 pub trait GamePacket: PacketId + Serialize + Sized + std::fmt::Debug {
     fn to_bytes(&self, sender_net_id: u32) -> Box<[u8]> {
         let mut data = Vec::with_capacity(core::mem::size_of::<Self>() + 1 + 4);
@@ -59,9 +61,13 @@ pub trait GamePacket: PacketId + Serialize + Sized + std::fmt::Debug {
 }
 impl<T> GamePacket for T where T: PacketId + Serialize + std::fmt::Debug {}
 
+/// A client to server packet handling implementation, this will be called (if registered in the
+/// PacketHandlerSystem) whenever a packet of the implementing Packet Type has been received.
 pub trait PacketHandlerImpl<'a>: GamePacket + for<'de> Deserialize<'de> {
+    /// The system data this handler needs access to
     type Data: SystemData<'a>;
 
+    /// The actual handler function that gets called by the system
     fn handle_self(self, data: Self::Data, cid: ClientId, sender_net_id: u32) -> Result<()>;
 }
 
@@ -216,7 +222,7 @@ impl<'a> PacketHandlerImpl<'a> for CCharSelected {
         cid: ClientId,
         _: u32,
     ) -> Result<()> {
-        let mut hero_data: [(SCreateHero, SAvatarInfo); 12] = Default::default();
+        let mut hero_data: [(SCreateHero, SAvatarInfo); PLAYER_COUNT_MAX] = Default::default();
         for ((cid, client), hero_data) in clients.iter().zip(hero_data.iter_mut()) {
             let net_id = net_ids.get(client.champion).unwrap();
             let sums = summoner_spells.get(client.champion).unwrap();

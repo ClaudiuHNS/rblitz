@@ -6,7 +6,7 @@ use crate::{
     client::ClientMap,
     config::PlayerConfig,
     lenet_server::LENetServer,
-    packet::{packet_dispatcher_sys::PacketDispatcher, packet_handler_system::PacketHandlerSys},
+    packet::{dispatcher_sys::PacketDispatcher, handler_sys::PacketHandlerSys},
     world::{
         components::{NetId, SummonerSpells, Team, UnitName},
         resources::GameTime,
@@ -71,12 +71,13 @@ impl<'a, 'b> GameServer<'a, 'b> {
                 (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64) / 1_000_000_000.0;
             delta_sum += delta;
             self.world.write_resource::<GameTime>().0 += delta;
+
             self.packet_handler.run(&mut self.server, &self.world);
-            self.dispatcher.dispatch_seq(&self.world.res);
-            self.dispatcher.dispatch_thread_local(&self.world.res);
 
             if delta_sum >= TICK_RATE {
                 delta_sum -= TICK_RATE;
+                self.dispatcher.dispatch_seq(&self.world.res);
+                self.dispatcher.dispatch_thread_local(&self.world.res);
                 self.tick();
             }
 
