@@ -182,7 +182,7 @@ pub(in crate) mod sized_string_null {
                     .next_element()?
                     .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?;
                 let mut buf: Vec<u8> = Vec::with_capacity(len as usize);
-                for _ in 1..len {
+                for _ in 0..len {
                     buf.push(
                         seq.next_element()?
                             .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
@@ -201,9 +201,9 @@ pub(in crate) mod sized_string_null {
         S: serde::Serializer,
     {
         let mut s = s.serialize_tuple(3)?;
-        s.serialize_element(&(string.len() as u32 + 1))?;
+        s.serialize_element(&(string.len() as u32))?;
         s.serialize_element(string.as_bytes())?;
-        s.serialize_element(&0)?;
+        s.serialize_element(&0u8)?;
         s.end()
     }
 }

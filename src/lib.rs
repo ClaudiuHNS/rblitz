@@ -7,7 +7,7 @@ pub mod game_server;
 mod client;
 mod error;
 mod lenet_server;
-mod nav_grid;
+//mod nav_grid;
 mod packet;
 mod systems;
 mod world;

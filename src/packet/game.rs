@@ -91,7 +91,7 @@ impl<'a> RawGamePacket<'a> {
 impl<'a> PacketHandlerImpl<'a> for CQueryStatusReq {
     type Data = PacketSender<'a>;
     fn handle_self(self, sender: Self::Data, cid: ClientId, _: u32) -> Result<()> {
-        sender.single_packet(cid, Channel::Broadcast, 0, &SQueryStatusAns { is_ok: true });
+        sender.gp_single(Channel::Broadcast, cid, 0, &SQueryStatusAns { is_ok: true });
         Ok(())
     }
 }
@@ -99,9 +99,9 @@ impl<'a> PacketHandlerImpl<'a> for CQueryStatusReq {
 impl<'a> PacketHandlerImpl<'a> for CReconnect {
     type Data = PacketSender<'a>;
     fn handle_self(self, sender: Self::Data, cid: ClientId, _: u32) -> Result<()> {
-        sender.single_packet(
-            cid,
+        sender.gp_single(
             Channel::ClientToServer,
+            cid,
             0,
             &SReconnect { client_id: cid.0 },
         );
@@ -146,9 +146,9 @@ impl<'a> PacketHandlerImpl<'a> for CSyncVersion {
             };
         }
 
-        sender.single_packet(
-            cid,
+        sender.gp_single(
             Channel::Broadcast,
+            cid,
             0,
             &SSyncVersion {
                 is_version_ok: true,
@@ -177,7 +177,7 @@ impl<'a> PacketHandlerImpl<'a> for CClientReady {
         clients.get_mut(&cid).unwrap().status = ClientStatus::Ready;
         if clients.values().all(|c| c.status == ClientStatus::Ready) {
             log::info!("All clients ready, starting game");
-            sender.broadcast_all(
+            sender.gp_broadcast_all(
                 Channel::Broadcast,
                 0,
                 &SStartGame {
@@ -187,9 +187,9 @@ impl<'a> PacketHandlerImpl<'a> for CClientReady {
             for (cid, c) in clients.iter_mut() {
                 c.status = ClientStatus::Connected;
                 let net_id = net_ids.get(c.champion).unwrap();
-                sender.single_packet(
-                    *cid,
+                sender.gp_single(
                     Channel::Broadcast,
+                    *cid,
                     net_id.id(),
                     &SOnEnterVisibilityClient {
                         entries: Vec::new(),
@@ -250,9 +250,9 @@ impl<'a> PacketHandlerImpl<'a> for CCharSelected {
             );
         }
 
-        sender.single_packet(
-            cid,
+        sender.gp_single(
             Channel::Broadcast,
+            cid,
             0,
             &SStartSpawn {
                 bot_count_order: 0,
@@ -261,10 +261,10 @@ impl<'a> PacketHandlerImpl<'a> for CCharSelected {
         );
         // FIXME make a function for this loop kinda thing in PacketSender?
         for (create, avatar) in hero_data.iter().take(clients.len()) {
-            sender.single_packet(cid, Channel::Broadcast, 0, create);
-            sender.single_packet(cid, Channel::Broadcast, 0, avatar);
+            sender.gp_single(Channel::Broadcast, cid, 0, create);
+            sender.gp_single(Channel::Broadcast, cid, 0, avatar);
         }
-        sender.single_packet(cid, Channel::Broadcast, 0, &SEndSpawn);
+        sender.gp_single(Channel::Broadcast, cid, 0, &SEndSpawn);
         Ok(())
     }
 }
@@ -276,7 +276,7 @@ impl<'a> PacketHandlerImpl<'a> for CPingLoadInfo {
     fn handle_self(mut self, (clients, sender): Self::Data, cid: ClientId, _: u32) -> Result<()> {
         let client = clients.get(&cid).unwrap();
         self.connection_info.player_id = client.player_id;
-        sender.broadcast_all(
+        sender.gp_broadcast_all(
             Channel::Broadcast,
             0,
             &SPingLoadInfo {

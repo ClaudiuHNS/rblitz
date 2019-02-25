@@ -77,7 +77,6 @@ impl<'a, 'b> GameServer<'a, 'b> {
                 delta_sum -= TICK_RATE;
                 self.dispatcher.dispatch_seq(&self.world.res);
                 self.dispatcher.dispatch_thread_local(&self.world.res);
-                self.tick();
             }
 
             self.world.maintain();
@@ -85,6 +84,4 @@ impl<'a, 'b> GameServer<'a, 'b> {
             std::thread::sleep_ms(1);
         }
     }
-
-    pub fn tick(&mut self) {}
 }

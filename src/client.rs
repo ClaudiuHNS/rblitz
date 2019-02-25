@@ -45,6 +45,7 @@ pub fn init_clients_from_config(world: &mut World, players: Vec<PlayerConfig>) {
             Client::new(
                 ent,
                 player.name,
+                player.team,
                 player.profile_icon,
                 player.summoner_level,
                 player.player_id,
@@ -192,19 +193,19 @@ impl ClientMap {
             })
             .collect::<Vec<_>>();
         sender.single(
-            cid,
             Channel::LoadingScreen,
+            cid,
             LoadingScreenPacket::to_bytes(&roster_update),
         );
         for (reskin, rename) in packets {
             sender.single(
-                cid,
                 Channel::LoadingScreen,
+                cid,
                 LoadingScreenPacket::to_bytes(&reskin),
             );
             sender.single(
-                cid,
                 Channel::LoadingScreen,
+                cid,
                 LoadingScreenPacket::to_bytes(&rename),
             );
         }
@@ -240,6 +241,7 @@ pub struct ClientId(pub u32);
 // otherwise we might end up with data races in enet itself. Also make sure to not access the LEnetServer together with mutable clients
 pub struct Client {
     pub name: String,
+    pub team: Team,
     pub player_id: u64,
     pub summoner_level: u16,
     pub profile_icon: i32,
@@ -252,6 +254,7 @@ impl Client {
     pub fn new(
         champion: Entity,
         name: String,
+        team: Team,
         profile_icon: i32,
         summoner_level: u16,
         player_id: u64,
@@ -259,6 +262,7 @@ impl Client {
     ) -> Self {
         Client {
             name,
+            team,
             player_id,
             summoner_level,
             profile_icon,

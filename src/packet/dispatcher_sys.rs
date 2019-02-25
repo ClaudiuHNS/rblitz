@@ -11,24 +11,38 @@ use shred::{System, SystemData, WriteExpect};
 pub struct PacketSender<'a>(shred::Fetch<'a, Sender<Command>>);
 
 impl<'a> PacketSender<'a> {
-    /// Sends data to a specified [`ClientId`]. Shouldnt be needed outside from the client module
-    pub fn single(&self, cid: ClientId, channel: Channel, data: Box<[u8]>) {
-        if let Err(e) = self.0.send(Command::Single(cid, channel, data)) {
+    /// Sends data to a specified [`ClientId`].
+    pub fn single(&self, channel: Channel, cid: ClientId, data: Box<[u8]>) {
+        if let Err(e) = self.0.send(Command::Single(channel, cid, data)) {
             log::warn!("{}", e);
         }
     }
 
-    /// Sends a single packet to a specified [`ClientId`]
-    pub fn single_packet<P>(&self, cid: ClientId, channel: Channel, sender_net_id: u32, packet: &P)
+    /// Sends data to all clients.
+    pub fn broadcast_all(&self, channel: Channel, data: Box<[u8]>) {
+        if let Err(e) = self.0.send(Command::BroadcastAll(channel, data)) {
+            log::warn!("{}", e);
+        }
+    }
+
+    /// Sends data to a range of clients.
+    pub fn broadcast_group(&self, channel: Channel, cids: Box<[ClientId]>, data: Box<[u8]>) {
+        if let Err(e) = self.0.send(Command::BroadcastGroup(channel, cids, data)) {
+            log::warn!("{}", e);
+        }
+    }
+
+    /// Sends a single game packet to a specified [`ClientId`]
+    pub fn gp_single<P>(&self, channel: Channel, cid: ClientId, sender_net_id: u32, packet: &P)
     where
         P: GamePacket,
     {
         log::trace!("[SENT][{}] {:?}", cid.0, packet);
-        self.single(cid, channel, packet.to_bytes(sender_net_id));
+        self.single(channel, cid, packet.to_bytes(sender_net_id));
     }
 
-    /// Sends a single packet to all clients
-    pub fn broadcast_all<P>(&self, channel: Channel, sender_net_id: u32, packet: &P)
+    /// Sends a single game packet to all clients
+    pub fn gp_broadcast_all<P>(&self, channel: Channel, sender_net_id: u32, packet: &P)
     where
         P: GamePacket,
     {
@@ -41,11 +55,11 @@ impl<'a> PacketSender<'a> {
         }
     }
 
-    /// Sends a single packet to a range of clients
-    pub fn broadcast_group<P>(
+    /// Sends a single game packet to a range of clients
+    pub fn gp_broadcast_group<P>(
         &self,
-        cids: Box<[ClientId]>,
         channel: Channel,
+        cids: Box<[ClientId]>,
         sender_net_id: u32,
         packet: &P,
     ) where
@@ -53,8 +67,8 @@ impl<'a> PacketSender<'a> {
     {
         log::trace!("[BROADCAST] {:?}", packet);
         if let Err(e) = self.0.send(Command::BroadcastGroup(
-            cids,
             channel,
+            cids,
             packet.to_bytes(sender_net_id),
         )) {
             log::warn!("{}", e);
@@ -78,8 +92,8 @@ impl<'a> SystemData<'a> for PacketSender<'a> {
 /// A "Command" for the PacketDispatcher, telling it what to do with the data it receives on the
 /// crossbeam channel
 pub enum Command {
-    Single(ClientId, Channel, Box<[u8]>),
-    BroadcastGroup(Box<[ClientId]>, Channel, Box<[u8]>),
+    Single(Channel, ClientId, Box<[u8]>),
+    BroadcastGroup(Channel, Box<[ClientId]>, Box<[u8]>),
     BroadcastAll(Channel, Box<[u8]>),
 }
 
@@ -99,10 +113,10 @@ impl<'a> System<'a> for PacketDispatcher {
     fn run(&mut self, mut connection_map: Self::SystemData) {
         for cmd in self.0.try_iter() {
             match cmd {
-                Command::Single(cid, channel, mut packet) => {
+                Command::Single(channel, cid, mut packet) => {
                     connection_map.send_data(cid, channel, &mut packet);
                 },
-                Command::BroadcastGroup(cids, channel, packet) => {
+                Command::BroadcastGroup(channel, cids, packet) => {
                     for cid in cids.iter() {
                         connection_map.send_data(*cid, channel, &mut packet.clone());
                     }

@@ -7,6 +7,7 @@ use crate::{
     client::{ClientConnectionMap, ClientId, ClientMap, ClientStatus},
     lenet_server::{Event, LENetServer},
     packet::{
+        chat,
         dispatcher_sys::PacketSender,
         game::{PacketHandler, PacketHandlerDummy, PacketHandlerImpl, RawGamePacket},
         Channel, KeyCheck,
@@ -56,7 +57,9 @@ impl<'r> PacketHandlerSys<'r> {
                     );
                 }
             },
-            Channel::Chat => (),
+            Channel::Chat => {
+                let _ = chat::handle_chat_message(world, cid, data);
+            },
             Channel::LoadingScreen => {
                 use rblitz_packets::packets::{loading_screen::RequestJoinTeam, PacketId};
                 if !data.is_empty() && RequestJoinTeam::ID == data[0] {
@@ -103,7 +106,7 @@ impl<'r> PacketHandlerSys<'r> {
                     for (cid_iter, client) in clients.iter() {
                         let mut check_id = client.player_id.to_le_bytes();
                         connections.encrypt_client(*cid_iter, &mut check_id);
-                        sender.single(cid, Channel::Handshake, unsafe {
+                        sender.single(Channel::Handshake, cid, unsafe {
                             core::slice::from_raw_parts(
                                 &KeyCheck {
                                     action: 0,
