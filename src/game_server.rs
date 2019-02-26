@@ -7,13 +7,13 @@ use crate::{
     config::PlayerConfig,
     lenet_server::LENetServer,
     packet::{dispatcher_sys::PacketDispatcher, handler_sys::PacketHandlerSys},
+    systems::sync_timer::SyncTimer,
     world::{
         components::{NetId, SummonerSpells, Team, UnitName},
-        resources::Time,
+        resources::{GameState, Time},
     },
+    TICK_RATE,
 };
-
-const TICK_RATE: f64 = 1.0 / 30.0;
 
 pub struct GameServer<'a, 'b> {
     world: World,
@@ -49,6 +49,9 @@ impl<'a, 'b> GameServer<'a, 'b> {
         let (packet_channel_send, packet_channel_receive) = crossbeam_channel::unbounded();
         world.add_resource(packet_channel_send);
         let mut dispatcher = DispatcherBuilder::new()
+            .with(SyncTimer::default(), "sync_timer", &[])
+            // move the dispatcher out of the system so it wont be limited by the tick rate given
+            // that we construct new packets in the handler already?
             .with_thread_local(PacketDispatcher::new(packet_channel_receive))
             .build();
         dispatcher.setup(&mut world.res);
@@ -65,10 +68,10 @@ impl<'a, 'b> GameServer<'a, 'b> {
         let mut last_instant = Instant::now();
         let mut delta_sum = 0.0;
         loop {
-            delta_sum += self
-                .world
-                .write_resource::<Time>()
-                .set_delta(last_instant.elapsed());
+            delta_sum += self.world.write_resource::<Time>().set_delta(
+                last_instant.elapsed(),
+                *self.world.read_resource::<GameState>() != GameState::Running,
+            );
             last_instant = Instant::now();
 
             self.packet_handler.run(&mut self.server, &self.world);
@@ -81,6 +84,7 @@ impl<'a, 'b> GameServer<'a, 'b> {
 
             self.world.maintain();
 
+            #[allow(deprecated)]
             std::thread::sleep_ms(1);
         }
     }

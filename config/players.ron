@@ -11,7 +11,7 @@
         summoner_spell1: 97039269,
         profile_icon: 0
     ),
-    (
+    /*(
         name: "Test2",
         key: "GLzvuWtyCfHyGhF3",
         player_id: 513,
@@ -22,5 +22,5 @@
         summoner_spell0: 97039269,
         summoner_spell1: 97039269,
         profile_icon: 0
-    ),
+    ),*/
 ]

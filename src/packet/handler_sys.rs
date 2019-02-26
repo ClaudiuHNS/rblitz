@@ -49,7 +49,8 @@ impl<'r> PacketHandlerSys<'r> {
                     handler
                         .handle(&world.res, cid, packet.sender_net_id, packet.data)
                         .unwrap();
-                } else {
+                // ignore CWorldSendCamera cause it spams the logs
+                } else if packet.id != 0x30 {
                     log::debug!(
                         "Unhandled Packet 0x{:X} received on channel {:?}",
                         packet.id,
@@ -124,7 +125,7 @@ impl<'r> PacketHandlerSys<'r> {
                 },
                 Err(e) => {
                     log::warn!("{:?}", e);
-                    unsafe { enet_sys::enet_peer_disconnect_now(peer, 0) }
+                    unsafe { enet_sys::enet_peer_disconnect_now(peer, 0) };
                 },
             }
         }
@@ -172,9 +173,9 @@ impl<'r> PacketHandlerSys<'r> {
         self.register_game_handler::<CCharSelected>();
         self.register_game_handler::<CPingLoadInfo>();
         self.register_game_handler::<CClientReady>();
-        self.register_game_handler::<CWorldSendCameraServer>();
         self.register_game_handler::<CSendSelectedObjID>();
         self.register_game_handler::<CExit>();
         self.register_game_handler::<CWorldLockCameraServer>();
+        self.register_game_handler::<CSyncSimTime>();
     }
 }

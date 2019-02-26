@@ -3,8 +3,8 @@
 
 use byteorder::{ReadBytesExt, LE};
 use serde::{Deserialize, Serialize};
-use shred::{ReadExpect, Resources, SystemData, WriteExpect};
-use specs::ReadStorage;
+use shred::{ReadExpect, Resources, SystemData, Write, WriteExpect};
+use specs::{Join, ReadStorage};
 
 use rblitz_packets::{
     packets::game::{answer::SQueryStatusAns, common::*, request::CQueryStatusReq, *},
@@ -15,7 +15,10 @@ use crate::{
     client::{ClientConnectionMap, ClientId, ClientMap, ClientStatus},
     error::Result,
     packet::{dispatcher_sys::PacketSender, Channel},
-    world::components::{NetId, SummonerSpells, Team, UnitName},
+    world::{
+        components::{NetId, SummonerSpells, Team, UnitName},
+        resources::GameState,
+    },
     PLAYER_COUNT_MAX,
 };
 
@@ -109,9 +112,9 @@ impl<'a> PacketHandlerImpl<'a> for CReconnect {
     }
 }
 
-impl<'a> PacketHandlerImpl<'a> for CSendSelectedObjID {
+impl<'a> PacketHandlerImpl<'a> for CSyncSimTime {
     type Data = ();
-    fn handle_self(self, _: Self::Data, _cid: ClientId, _: u32) -> Result<()> {
+    fn handle_self(self, _: Self::Data, _: ClientId, _: u32) -> Result<()> {
         Ok(())
     }
 }
@@ -162,20 +165,23 @@ impl<'a> PacketHandlerImpl<'a> for CSyncVersion {
     }
 }
 
+/// The client sends this packet when it received a SSpawnEnd
 impl<'a> PacketHandlerImpl<'a> for CClientReady {
     type Data = (
         ReadStorage<'a, NetId>,
         WriteExpect<'a, ClientMap>,
+        Write<'a, GameState>,
         PacketSender<'a>,
     );
     fn handle_self(
         self,
-        (net_ids, mut clients, sender): Self::Data,
+        (net_ids, mut clients, mut state, sender): Self::Data,
         cid: ClientId,
         _: u32,
     ) -> Result<()> {
         clients.get_mut(&cid).unwrap().status = ClientStatus::Ready;
-        if clients.values().all(|c| c.status == ClientStatus::Ready) {
+        if *state == GameState::Loading && clients.values().all(|c| c.status == ClientStatus::Ready)
+        {
             log::info!("All clients ready, starting game");
             sender.gp_broadcast_all(
                 Channel::Broadcast,
@@ -184,6 +190,12 @@ impl<'a> PacketHandlerImpl<'a> for CClientReady {
                     tournament_pause_enabled: false,
                 },
             );
+            sender.gp_broadcast_all(
+                Channel::Broadcast,
+                0,
+                &SSyncMissionStartTime { start_time: 01.0 },
+            );
+            *state = GameState::Running;
             for (cid, c) in clients.iter_mut() {
                 c.status = ClientStatus::Connected;
                 let net_id = net_ids.get(c.champion).unwrap();
@@ -224,23 +236,24 @@ impl<'a> PacketHandlerImpl<'a> for CCharSelected {
     ) -> Result<()> {
         let mut hero_data: [(SCreateHero, SAvatarInfo); PLAYER_COUNT_MAX] = Default::default();
         for ((cid, client), hero_data) in clients.iter().zip(hero_data.iter_mut()) {
-            let net_id = net_ids.get(client.champion).unwrap();
-            let sums = summoner_spells.get(client.champion).unwrap();
-
+            let (sums, team, net_id, unit_name) = (&summoner_spells, &teams, &net_ids, &unit_names)
+                .join()
+                .get_unchecked(client.champion.id())
+                .expect("Client owns an invalid champion entity");
             *hero_data = (
                 SCreateHero {
                     unit_net_id: net_id.id(),
                     client_id: cid.0,
                     net_node_id: net_id.node_id() as u8,
                     skill_level: 0,
-                    team_is_order: *teams.get(client.champion).unwrap() == Team::Order,
+                    team_is_order: *team == Team::Order,
                     is_bot: false,
                     bot_rank: 0,
                     // FIXME
                     spawn_position_index: cid.0 as u8 % 5,
                     skin_id: client.champ_skin_id,
                     name: client.name.clone(),
-                    skin: unit_names.get(client.champion).unwrap().0.clone(),
+                    skin: unit_name.0.clone(),
                 },
                 SAvatarInfo {
                     summoner_spell_ids: [sums.0, sums.1],
@@ -262,7 +275,7 @@ impl<'a> PacketHandlerImpl<'a> for CCharSelected {
         // FIXME make a function for this loop kinda thing in PacketSender?
         for (create, avatar) in hero_data.iter().take(clients.len()) {
             sender.gp_single(Channel::Broadcast, cid, 0, create);
-            sender.gp_single(Channel::Broadcast, cid, 0, avatar);
+            sender.gp_single(Channel::Broadcast, cid, create.unit_net_id, avatar);
         }
         sender.gp_single(Channel::Broadcast, cid, 0, &SEndSpawn);
         Ok(())
@@ -306,6 +319,13 @@ impl<'a> PacketHandlerImpl<'a> for CWorldSendCameraServer {
 impl<'a> PacketHandlerImpl<'a> for CWorldLockCameraServer {
     type Data = ();
     #[inline]
+    fn handle_self(self, _: Self::Data, _cid: ClientId, _: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> PacketHandlerImpl<'a> for CSendSelectedObjID {
+    type Data = ();
     fn handle_self(self, _: Self::Data, _cid: ClientId, _: u32) -> Result<()> {
         Ok(())
     }

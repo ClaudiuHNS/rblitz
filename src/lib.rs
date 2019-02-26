@@ -14,3 +14,6 @@ mod world;
 
 // The client is unable to handle more than this
 const PLAYER_COUNT_MAX: usize = 12;
+
+const TICKS_PER_SECOND: u64 = 30;
+const TICK_RATE: f64 = 1.0 / TICKS_PER_SECOND as f64;
