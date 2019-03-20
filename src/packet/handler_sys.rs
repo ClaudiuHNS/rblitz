@@ -46,9 +46,9 @@ impl<'r> PacketHandlerSys<'r> {
             | Channel::BroadcastUnreliable => {
                 let packet = RawGamePacket::from_slice(data).unwrap();
                 if let Some(handler) = self.game_handlers.get(&packet.id) {
-                    handler
+                    let _ = handler
                         .handle(&world.res, cid, packet.sender_net_id, packet.data)
-                        .unwrap();
+                        .map_err(|e| log::warn!("{}", e));
                 // ignore CWorldSendCamera cause it spams the logs
                 } else if packet.id != 0x30 {
                     log::debug!(
@@ -177,5 +177,7 @@ impl<'r> PacketHandlerSys<'r> {
         self.register_game_handler::<CExit>();
         self.register_game_handler::<CWorldLockCameraServer>();
         self.register_game_handler::<CSyncSimTime>();
+        self.register_game_handler::<CWaypointAck>();
+        self.register_game_handler::<CNpcIssueOrderReq>();
     }
 }

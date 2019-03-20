@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 //! currently this is just a collection of almost all packet handlers, ideally the packet handler
 //! should be defined where they make the most sense though
 
@@ -47,6 +48,7 @@ where
         sender_net_id: u32,
         data: &[u8],
     ) -> Result<()> {
+        log::trace!("[RECEIVED] {:?}", data);
         let packet = rblitz_packets::from_bytes::<T>(data)?;
         log::trace!("[RECEIVED] {:?}", packet);
         packet.handle_self(T::Data::fetch(res), cid, sender_net_id)
@@ -207,8 +209,8 @@ impl<'a> PacketHandlerImpl<'a> for CClientReady {
                         entries: Vec::new(),
                         look_at_pos: None,
                         movement_data: MovementData::Stop(MovementDataStop {
-                            position: Vector2 { x: 26.0, y: 280.0 },
-                            forward: Vector2 { x: 26.0, y: 280.0 },
+                            position: Vector2 { x: 0.0, y: 0.0 },
+                            forward: Vector2 { x: 1.0, y: 0.0 },
                         }),
                     },
                 );
@@ -308,6 +310,36 @@ impl<'a> PacketHandlerImpl<'a> for CExit {
     }
 }
 
+impl<'a> PacketHandlerImpl<'a> for CNpcIssueOrderReq {
+    type Data = (
+        ReadExpect<'a, ClientMap>,
+        ReadStorage<'a, NetId>,
+        PacketSender<'a>,
+    );
+    #[inline]
+    fn handle_self(
+        self,
+        (client_map, net_ids, sender): Self::Data,
+        cid: ClientId,
+        _: u32,
+    ) -> Result<()> {
+        if self.order_type == OrderType::Move {
+            let client = client_map.get(&cid).unwrap();
+            let net_id = net_ids.get(client.champion).unwrap();
+            sender.gp_single(
+                Channel::Broadcast,
+                cid,
+                net_id.id(),
+                &SWaypointGroup {
+                    sync_id: 0,
+                    movements: vec![self.movement_data],
+                },
+            );
+        }
+        Ok(())
+    }
+}
+
 impl<'a> PacketHandlerImpl<'a> for CWorldSendCameraServer {
     type Data = ();
     #[inline]
@@ -325,6 +357,13 @@ impl<'a> PacketHandlerImpl<'a> for CWorldLockCameraServer {
 }
 
 impl<'a> PacketHandlerImpl<'a> for CSendSelectedObjID {
+    type Data = ();
+    fn handle_self(self, _: Self::Data, _cid: ClientId, _: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> PacketHandlerImpl<'a> for CWaypointAck {
     type Data = ();
     fn handle_self(self, _: Self::Data, _cid: ClientId, _: u32) -> Result<()> {
         Ok(())

@@ -797,16 +797,6 @@ pub struct SPauseAnimation {
     pub pause: bool,
 }
 
-#[packet_id(0x75)]
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
-pub struct SNpcIssueOrderReq {
-    pub order_type: u8,
-    pub position: Vector3,
-    pub target_net_id: u32,
-    #[serde(default)]
-    pub movement_data: MovementDataNormal,
-}
-
 #[packet_id(0x76)]
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
 pub struct SCameraBehavior {
@@ -832,13 +822,6 @@ pub struct SSyncSimTimeFinal {
     pub time_last_client: f32,
     pub time_rtt_last_overhead: f32,
     pub time_convergence: f32,
-}
-
-#[packet_id(0x7A)]
-#[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
-pub struct SWaypointAcc {
-    pub sync_id: i32,
-    pub teleport_count: u8,
 }
 
 #[packet_id(0x7B)]

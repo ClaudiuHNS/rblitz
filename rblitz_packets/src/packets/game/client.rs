@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use super::{common::ConnectionInfo, packet_id};
-use crate::Vector3;
+use crate::{
+    packets::game::common::{MovementDataNormal, OrderType},
+    Vector3,
+};
 
 #[packet_id(0x05)]
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
@@ -76,6 +79,22 @@ pub struct CTipEvent {
     pub tip_id: u32,
 }
 
+#[packet_id(0x7A)]
+#[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
+pub struct CWaypointAck {
+    pub sync_id: i32,
+    pub teleport_count: u8,
+}
+
+#[packet_id(0x75)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct CNpcIssueOrderReq {
+    pub order_type: OrderType,
+    pub position: Vector3,
+    pub target_net_id: u32,
+    pub movement_data: MovementDataNormal,
+}
+
 #[packet_id(0x86)]
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
 pub struct CWorldLockCameraServer {
@@ -95,13 +114,13 @@ pub struct CExit;
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
 pub struct CClientConnectNamedPipe;
 
-#[packet_id(0xA4)]
+#[packet_id(0xAC)]
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
 pub struct CTeamSurrenderVote {
     pub voted_yes: bool,
 }
 
-#[packet_id(0xAC)]
+#[packet_id(0xA4)]
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
 pub struct CReconnect {
     pub is_full_reconnect: bool,

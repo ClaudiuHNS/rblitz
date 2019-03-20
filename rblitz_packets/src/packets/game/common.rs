@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 
 pub use super::bitfield::*;
 
@@ -87,9 +88,112 @@ pub struct Color {
     pub alpha: u8,
 }
 
-//todo pub struct CompressedWayPoints
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
-pub struct CompressedWaypoint;
+pub struct CompressedWaypoint {
+    pub x: i16,
+    pub z: i16,
+}
+
+// this is awful garbage
+fn read_compressed_waypoints<'de, A>(
+    mut seq: A,
+    size: u8,
+) -> Result<Vec<CompressedWaypoint>, A::Error>
+where
+    A: serde::de::SeqAccess<'de>,
+{
+    let mut points = Vec::with_capacity(size as usize);
+    let (flags, num_bytes) = if size > 1 {
+        let num_bytes = (size - 2) / 4 + 1;
+        let mut buf = (0..num_bytes)
+            .filter_map(|_| seq.next_element().transpose())
+            .collect::<Result<Vec<u8>, _>>()?;
+        // cant `rev` the iterator cause it wouldnt change the order
+        buf.reverse();
+        (bit_vec::BitVec::from_bytes(&buf), num_bytes)
+    } else {
+        (bit_vec::BitVec::from_elem(8, false), 1)
+    };
+    let mut last_x: i16 = crate::util::seq_next_elem(&mut seq)?;
+    let mut last_z: i16 = crate::util::seq_next_elem(&mut seq)?;
+    points.push(CompressedWaypoint {
+        x: last_x,
+        z: last_z,
+    });
+    // flagidx should increment up from 0, this is a hack cause of how bitvec works.
+    // This might make problems when bitvec is bigger than a byte
+    let mut flag_idx = num_bytes as usize * 8 - 1;
+    for _ in 1..size {
+        if flags[flag_idx] {
+            last_x += crate::util::seq_next_elem::<_, i8>(&mut seq)? as i16;
+        } else {
+            last_x = crate::util::seq_next_elem(&mut seq)?;
+        }
+        flag_idx -= 1;
+        if flags[flag_idx] {
+            last_z += crate::util::seq_next_elem::<_, i8>(&mut seq)? as i16;
+        } else {
+            last_z = crate::util::seq_next_elem(&mut seq)?;
+        }
+        flag_idx = flag_idx.wrapping_sub(1);
+        points.push(CompressedWaypoint {
+            x: last_x,
+            z: last_z,
+        });
+    }
+    Ok(points)
+}
+
+fn write_compressed_waypoints<A>(
+    seq: &mut A,
+    waypoints: &[CompressedWaypoint],
+) -> Result<(), A::Error>
+where
+    A: serde::ser::SerializeSeq,
+{
+    assert!(!waypoints.is_empty());
+    let flag_array_len = (waypoints.len().saturating_sub(2)) / 4 + 1;
+    let mut flags = bit_vec::BitVec::from_elem(flag_array_len * 8, false);
+
+    let mut flag_idx = flags.len() - 1;
+    for i in 1..waypoints.len() {
+        let relative_x = waypoints[i].x - waypoints[i - 1].x;
+        flags.set(
+            flag_idx,
+            relative_x <= i8::max_value() as i16 && relative_x >= i8::min_value() as i16,
+        );
+        flag_idx -= 1;
+
+        let relative_z = waypoints[i].z - waypoints[i - 1].z;
+        flags.set(
+            flag_idx,
+            relative_z <= i8::max_value() as i16 && relative_z >= i8::min_value() as i16,
+        );
+        flag_idx = flag_idx.wrapping_sub(1);
+    }
+    let mut flag_bytes = flags.to_bytes();
+    flag_bytes.reverse();
+    seq.serialize_element(&flag_bytes);
+    seq.serialize_element(&waypoints[0].x)?;
+    seq.serialize_element(&waypoints[0].z)?;
+
+    let mut flag_idx = flags.len() - 1;
+    for i in 1..waypoints.len() {
+        if flags[flag_idx] {
+            seq.serialize_element(&((waypoints[i].x - waypoints[i - 1].x) as i8))?;
+        } else {
+            seq.serialize_element(&waypoints[i].x)?;
+        }
+        flag_idx -= 1;
+        if flags[flag_idx] {
+            seq.serialize_element(&((waypoints[i].z - waypoints[i - 1].z) as i8))?;
+        } else {
+            seq.serialize_element(&waypoints[i].z)?;
+        }
+        flag_idx = flag_idx.wrapping_sub(1);
+    }
+    Ok(())
+}
 
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
 pub struct ConnectionInfo {
@@ -171,7 +275,7 @@ impl<'de> serde::Deserialize<'de> for MovementData {
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::{Error, SeqAccess, Visitor};
+        use serde::de::{SeqAccess, Visitor};
 
         struct MovVisitor;
 
@@ -186,26 +290,12 @@ impl<'de> serde::Deserialize<'de> for MovementData {
             where
                 A: SeqAccess<'de>,
             {
-                let lookahead: u8 = seq
-                    .next_element()?
-                    .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?;
+                let lookahead: u8 = crate::util::seq_next_elem(&mut seq)?;
                 Ok(match lookahead {
-                    1 => MovementData::Speed(
-                        seq.next_element()?
-                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
-                    ),
-                    2 => MovementData::Normal(
-                        seq.next_element()?
-                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
-                    ),
-                    3 => MovementData::Stop(
-                        seq.next_element()?
-                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
-                    ),
-                    _ => MovementData::None(
-                        seq.next_element()?
-                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
-                    ),
+                    1 => MovementData::Speed(crate::util::seq_next_elem(&mut seq)?),
+                    2 => MovementData::Normal(crate::util::seq_next_elem(&mut seq)?),
+                    3 => MovementData::Stop(crate::util::seq_next_elem(&mut seq)?),
+                    _ => MovementData::None(crate::util::seq_next_elem(&mut seq)?),
                 })
             }
         }
@@ -220,7 +310,7 @@ impl serde::Serialize for MovementData {
         S: serde::Serializer,
     {
         use serde::ser::SerializeTuple;
-        let mut s = s.serialize_tuple(2)?;
+        let mut s = s.serialize_tuple(1)?;
         match self {
             MovementData::Stop(data) => s.serialize_element(data)?,
             MovementData::Normal(data) => s.serialize_element(data)?,
@@ -230,13 +320,78 @@ impl serde::Serialize for MovementData {
         s.end()
     }
 }
-// todo implement actual de/serialization
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+
+#[derive(Clone, Debug, Default)]
 pub struct MovementDataNormal {
-    pub teleport_net_id: u32,
-    pub has_teleport_id: bool,
-    pub teleport_id: u8,
+    pub teleport_id: Option<u8>,
+    pub teleport_net_id: Option<u32>,
     pub waypoints: Vec<CompressedWaypoint>,
+}
+
+impl<'de> serde::Deserialize<'de> for MovementDataNormal {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{SeqAccess, Visitor};
+
+        struct MovNormalVisitor;
+
+        impl<'de> Visitor<'de> for MovNormalVisitor {
+            type Value = MovementDataNormal;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("movnormaldata")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let has_teleport_id = (crate::util::seq_next_elem::<_, u16>(&mut seq)? & 1) != 0;
+                let size = (crate::util::seq_next_elem::<_, u16>(&mut seq)? & 0x7F) as u8;
+                let mut teleport_net_id: Option<u32> = None;
+                let mut teleport_id: Option<u8> = None;
+                let waypoints = if size != 0 {
+                    teleport_net_id = Some(crate::util::seq_next_elem(&mut seq)?);
+                    if has_teleport_id {
+                        teleport_id = Some(crate::util::seq_next_elem(&mut seq)?);
+                    }
+                    read_compressed_waypoints(seq, size)?
+                } else {
+                    Vec::new()
+                };
+                Ok(MovementDataNormal {
+                    teleport_net_id,
+                    teleport_id,
+                    waypoints,
+                })
+            }
+        }
+
+        d.deserialize_seq(MovNormalVisitor)
+    }
+}
+
+impl serde::Serialize for MovementDataNormal {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        let mut s = s.serialize_seq(None)?;
+
+        s.serialize_element(&((self.teleport_id.is_some() as u16) << 1))?;
+        s.serialize_element(&((self.waypoints.len() as u16) & 0x7F))?;
+        if !self.waypoints.is_empty() {
+            s.serialize_element(&self.teleport_net_id.unwrap())?;
+            if let Some(tp_id) = self.teleport_id {
+                s.serialize_element(&tp_id)?;
+            }
+            write_compressed_waypoints(&mut s, &self.waypoints)?;
+        }
+        s.end()
+    }
 }
 
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]
@@ -260,6 +415,15 @@ pub struct NavFlagCircle {
     pub position: Vector2,
     pub radius: f32,
     pub flags: u32,
+}
+
+#[derive(Deserialize_repr, Serialize_repr, Copy, Clone, Debug, PartialOrd, PartialEq)]
+#[repr(u8)]
+pub enum OrderType {
+    Hold = 1,
+    Move = 2,
+    AttackMove = 7,
+    Stop = 10,
 }
 
 #[derive(Deserialize, Serialize, Copy, Clone, Debug, Default)]

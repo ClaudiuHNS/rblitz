@@ -10,6 +10,8 @@ publish = false
 byteorder = "~1.2"
 rblitz_packets_proc_macro = { version = "0.1.0", path = "./rblitz_packets_proc_macro" }
 indexmap = { version = "~1.0", features = ["serde-1"] }
+bit-vec = "0.5.0"
+serde_repr = "0.1"
 
 [dependencies.serde]
 version = "~1.0"

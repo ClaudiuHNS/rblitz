@@ -31,9 +31,8 @@ macro_rules! make_bitfield {
 
 macro_rules! make_fixed_string {
     ($ident:ident $e:expr) => {
-        #[allow(dead_code)]
         pub(in crate) mod $ident {
-            use serde::de::{SeqAccess, Visitor, Error};
+            use serde::de::{SeqAccess, Visitor};
             pub fn deserialize<'de, D>(d: D) -> Result<String, D::Error>
                 where
                     D: serde::Deserializer<'de>,
@@ -51,9 +50,9 @@ macro_rules! make_fixed_string {
                         where
                             A: SeqAccess<'de>,
                     {
-                        let string: String = seq.next_element()?.ok_or(Error::custom(crate::Error::UnexpectedEof))?;
+                        let string: String = crate::util::seq_next_elem(&mut seq)?;
                         for _ in string.len()..$e {
-                            seq.next_element::<u8>()?.ok_or(Error::custom(crate::Error::UnexpectedEof))?;
+                            crate::util::seq_next_elem::<_, u8>(&mut seq)?;
                         }
                         Ok(string)
                     }
@@ -83,7 +82,7 @@ macro_rules! make_sized_vec {
                     T: serde::Deserialize<'de>,
             {
                 use core::marker::PhantomData;
-                use serde::de::{Error, SeqAccess, Visitor};
+                use serde::de::{SeqAccess, Visitor};
 
                 struct SizedVecVisitor<'de, T: serde::Deserialize<'de>>(PhantomData<&'de T>);
 
@@ -98,15 +97,11 @@ macro_rules! make_sized_vec {
                         where
                             A: SeqAccess<'de>,
                     {
-                        let len: $e = seq
-                            .next_element()?
-                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?;
+                        let len: $e = crate::util::seq_next_elem(&mut seq)?;
                         let mut buf: Vec<T> = Vec::with_capacity(len as usize);
                         for _ in 0..len {
                             buf.push(
-                                seq.next_element()?
-                                    .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
-                            );
+                                crate::util::seq_next_elem(&mut seq)?);
                         }
                         Ok(buf)
                     }

@@ -1,5 +1,15 @@
 #![allow(dead_code)]
 
+pub fn seq_next_elem<'de, A, T>(seq: &mut A) -> Result<T, A::Error>
+where
+    A: serde::de::SeqAccess<'de>,
+    T: serde::de::Deserialize<'de>,
+{
+    use serde::de::Error;
+    seq.next_element()?
+        .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))
+}
+
 // riot decided that some bools can be of garbage value with just the first bit being significant,
 // this fucks us over if we were to just interpret the bytes as bools cause it seems that 0 is false
 // and everything else is true in rust
@@ -43,7 +53,7 @@ pub(in crate) mod lookahead_u8 {
         T: serde::Deserialize<'de>,
     {
         use core::marker::PhantomData;
-        use serde::de::{Error, SeqAccess, Visitor};
+        use serde::de::{SeqAccess, Visitor};
 
         struct OptVecVisitor<'de, T: serde::Deserialize<'de>>(PhantomData<&'de T>);
 
@@ -58,9 +68,7 @@ pub(in crate) mod lookahead_u8 {
             where
                 A: SeqAccess<'de>,
             {
-                let lookahead: u8 = seq
-                    .next_element()?
-                    .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?;
+                let lookahead: u8 = crate::util::seq_next_elem(&mut seq)?;
                 if lookahead != 0 {
                     seq.next_element()
                 } else {
@@ -129,15 +137,10 @@ pub(in crate) mod sized_string {
             where
                 A: SeqAccess<'de>,
             {
-                let len: u32 = seq
-                    .next_element()?
-                    .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?;
+                let len: u32 = crate::util::seq_next_elem(&mut seq)?;
                 let mut buf: Vec<u8> = Vec::with_capacity(len as usize);
                 for _ in 0..len {
-                    buf.push(
-                        seq.next_element()?
-                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
-                    );
+                    buf.push(crate::util::seq_next_elem(&mut seq)?);
                 }
                 String::from_utf8(buf).map_err(|e| Error::custom(e.utf8_error()))
             }
@@ -178,18 +181,12 @@ pub(in crate) mod sized_string_null {
             where
                 A: SeqAccess<'de>,
             {
-                let len: u32 = seq
-                    .next_element()?
-                    .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?;
+                let len: u32 = crate::util::seq_next_elem(&mut seq)?;
                 let mut buf: Vec<u8> = Vec::with_capacity(len as usize);
                 for _ in 0..len {
-                    buf.push(
-                        seq.next_element()?
-                            .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?,
-                    );
+                    buf.push(crate::util::seq_next_elem(&mut seq)?);
                 }
-                seq.next_element()?
-                    .ok_or_else(|| Error::custom(crate::Error::UnexpectedEof))?;
+                crate::util::seq_next_elem(&mut seq)?;
                 String::from_utf8(buf).map_err(|e| Error::custom(e.utf8_error()))
             }
         }
